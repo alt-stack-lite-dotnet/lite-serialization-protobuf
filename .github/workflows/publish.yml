@@ -1,0 +1,52 @@
+name: Publish Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure tag commit is in release branch
+        run: |
+          if git branch -r --contains "${GITHUB_SHA}" | grep -Eq "origin/release/"; then
+            echo "Tag commit is in release branch."
+          else
+            echo "Tag commit is NOT in release/* branch. Skipping publish."
+            exit 1
+          fi
+        working-directory: Lite.Serialization.Protobuf
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore
+        working-directory: Lite.Serialization.Protobuf
+
+      - name: Build
+        run: dotnet build -c Release --no-restore
+        working-directory: Lite.Serialization.Protobuf
+
+      - name: Pack core and body packages
+        run: |
+          dotnet pack "sources/Lite.Serialization.Protobuf/Lite.Serialization.Protobuf.csproj" -c Release --no-build -o ./nupkg
+          dotnet pack "sources/Lite.Serialization.Protobuf.Body.Json/Lite.Serialization.Protobuf.Body.Json.csproj" -c Release --no-build -o ./nupkg
+          dotnet pack "sources/Lite.Serialization.Protobuf.Body.Xml/Lite.Serialization.Protobuf.Body.Xml.csproj" -c Release --no-build -o ./nupkg
+          dotnet pack "sources/Lite.Serialization.Protobuf.Body.MessagePack/Lite.Serialization.Protobuf.Body.MessagePack.csproj" -c Release --no-build -o ./nupkg
+          dotnet pack "sources/Lite.Serialization.Protobuf.Body.MemoryPack/Lite.Serialization.Protobuf.Body.MemoryPack.csproj" -c Release --no-build -o ./nupkg
+        working-directory: Lite.Serialization.Protobuf
+
+      - name: Push packages to NuGet
+        run: dotnet nuget push "./nupkg/*.nupkg" --api-key "${{ secrets.NUGET_API_KEY }}" --source "https://api.nuget.org/v3/index.json" --skip-duplicate
+        working-directory: Lite.Serialization.Protobuf
+

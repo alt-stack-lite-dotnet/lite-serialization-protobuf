@@ -1,0 +1,29 @@
+# Pre-commit: https://pre-commit.com
+#
+# Установка:
+#   pip install -r requirements.txt
+#   pre-commit install
+#   pre-commit install --hook-type pre-push
+#
+# Линт на коммит, линт + сборка + тесты на пуш.
+
+default_language_version:
+  python: python3
+
+repos:
+  - repo: local
+    hooks:
+      - id: lint
+        name: format (csharpier) & build
+        entry: python .config/run_lint.py
+        language: system
+        stages: [pre-commit]
+        pass_filenames: false
+
+      - id: push-check
+        name: build & test
+        entry: python .config/run_pre_push.py
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+

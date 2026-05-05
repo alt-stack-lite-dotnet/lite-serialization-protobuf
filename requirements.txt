@@ -1,0 +1,4 @@
+# Python-зависимости для хуков и скриптов
+# Использование: pip install -r requirements.txt (лучше в venv: python -m venv .venv && .venv\Scripts\activate)
+pre-commit>=4.0.0
+

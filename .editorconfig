@@ -1,0 +1,17 @@
+root = true
+
+[*]
+end_of_line = lf
+insert_final_newline = true
+
+[* .cs]
+
+# Keep Roslynator mostly in "suggestion" mode to avoid duplicating ReSharper hints.
+dotnet_analyzer_diagnostic.category-Roslynator.severity = suggestion
+dotnet_diagnostic.RCS*.severity = suggestion
+
+# Compilation & runtime warnings should still be visible.
+dotnet_analyzer_diagnostic.category-Compiler.severity = warning
+dotnet_analyzer_diagnostic.category-Reliability.severity = warning
+dotnet_analyzer_diagnostic.category-Security.severity = warning
+
