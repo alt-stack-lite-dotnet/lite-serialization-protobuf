@@ -1,3 +1,4 @@
+using System;
 using System.Linq.Expressions;
 
 namespace Lite.Serialization.Protobuf.Fluent;

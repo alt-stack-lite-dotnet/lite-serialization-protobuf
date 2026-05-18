@@ -1,4 +1,5 @@
 using Lite.Serialization.Protobuf;
+using Xunit;
 
 namespace Lite.Serialization.Protobuf.Tests;
 

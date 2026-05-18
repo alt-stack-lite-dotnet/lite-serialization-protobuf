@@ -9,7 +9,12 @@
     <CompilerGeneratedFilesOutputPath>$(IntermediateOutputPath)Generated</CompilerGeneratedFilesOutputPath>
     <InterceptorsNamespaces>$(InterceptorsNamespaces);Lite.Serialization.Protobuf.Generated</InterceptorsNamespaces>
     <InterceptorsPreviewNamespaces>$(InterceptorsPreviewNamespaces);Lite.Serialization.Protobuf.Generated</InterceptorsPreviewNamespaces>
+    <LiteSerializerInterceptGrpc>true</LiteSerializerInterceptGrpc>
   </PropertyGroup>
+
+  <ItemGroup>
+    <CompilerVisibleProperty Include="LiteSerializerInterceptGrpc" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.4" />

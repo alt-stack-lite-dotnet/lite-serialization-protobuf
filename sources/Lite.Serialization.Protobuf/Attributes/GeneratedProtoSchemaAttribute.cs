@@ -1,3 +1,5 @@
+using System;
+
 namespace Lite.Serialization.Protobuf;
 
 [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true, Inherited = false)]

@@ -30,21 +30,67 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
             .Where(static c => c is not null)
             .Select(static (c, _) => c!);
 
+        // grpc::Marshallers.Create<T>(...) call sites — for the gRPC.NET interop config-toggle
+        var marshallerSites = context.SyntaxProvider.CreateSyntaxProvider(
+            predicate: static (node, _) => node is InvocationExpressionSyntax inv && IsGenericCall(inv, "Create"),
+            transform: static (ctx, ct) => TryExtractMarshallerSite(ctx, ct))
+            .Where(static x => x is not null)
+            .Select(static (x, _) => x!.Value);
+
+        // build_property.LiteSerializerInterceptGrpc — enables Marshallers.Create interception
+        var interceptGrpc = context.AnalyzerConfigOptionsProvider.Select(static (opts, _) =>
+            opts.GlobalOptions.TryGetValue("build_property.LiteSerializerInterceptGrpc", out var v)
+            && string.Equals(v, "true", StringComparison.OrdinalIgnoreCase));
+
         var combined = context.CompilationProvider
             .Combine(callSites.Collect())
-            .Combine(configs.Collect());
+            .Combine(configs.Collect())
+            .Combine(marshallerSites.Collect())
+            .Combine(interceptGrpc);
 
-        context.RegisterSourceOutput(combined, static (spc, triple) =>
+        context.RegisterSourceOutput(combined, static (spc, data) =>
         {
-            var compilation = (CSharpCompilation)triple.Left.Left;
-            var sites = triple.Left.Right;
-            var configList = triple.Right;
-            try { Emit(spc, compilation, sites, configList); }
+            var compilation = (CSharpCompilation)data.Left.Left.Left.Left;
+            var sites = data.Left.Left.Left.Right;
+            var configList = data.Left.Left.Right;
+            var grpcSites = data.Left.Right;
+            var interceptGrpcEnabled = data.Right;
+            try { Emit(spc, compilation, sites, configList, interceptGrpcEnabled ? grpcSites : ImmutableArray<GrpcMarshallerSite>.Empty); }
             catch (Exception ex)
             {
                 spc.ReportDiagnostic(Diagnostic.Create(GeneratorCrashed, Location.None, ex.GetType().Name, ex.Message));
             }
         });
+    }
+
+    private static bool IsGenericCall(InvocationExpressionSyntax inv, string name)
+    {
+        if (inv.Expression is GenericNameSyntax g)
+            return g.Identifier.Text == name && g.TypeArgumentList.Arguments.Count == 1;
+        if (inv.Expression is MemberAccessExpressionSyntax ma && ma.Name is GenericNameSyntax gma)
+            return gma.Identifier.Text == name && gma.TypeArgumentList.Arguments.Count == 1;
+        return false;
+    }
+
+    private static GrpcMarshallerSite? TryExtractMarshallerSite(GeneratorSyntaxContext ctx, CancellationToken ct)
+    {
+        var inv = (InvocationExpressionSyntax)ctx.Node;
+        if (ctx.SemanticModel.GetSymbolInfo(inv, ct).Symbol is not IMethodSymbol method) return null;
+        if (method.ContainingType?.ToDisplayString() != "Grpc.Core.Marshallers") return null;
+        if (method.Name != "Create") return null;
+        if (method.TypeArguments.Length != 1) return null;
+        if (method.TypeArguments[0] is not INamedTypeSymbol target) return null;
+        if (target.IsAbstract || target.IsStatic || target.TypeKind == TypeKind.Interface) return null;
+
+        var loc = ctx.SemanticModel.GetInterceptableLocation(inv, ct);
+        if (loc is null) return null;
+
+        var paramTypes = string.Join("|", method.Parameters.Select(
+            p => p.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)));
+
+        return new GrpcMarshallerSite(
+            target.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            loc.Version, loc.Data, paramTypes);
     }
 
     // ----- Discovery: LiteSerializer.For/MarshallerFor/Serialize/Deserialize<T>() call sites -----
@@ -200,9 +246,10 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
     }
 
     // ----- Emission entry -----
-    private static void Emit(SourceProductionContext spc, CSharpCompilation compilation, ImmutableArray<CallSite> sites, ImmutableArray<ConfigInfo> configs)
+    private static void Emit(SourceProductionContext spc, CSharpCompilation compilation, ImmutableArray<CallSite> sites,
+        ImmutableArray<ConfigInfo> configs, ImmutableArray<GrpcMarshallerSite> grpcSites)
     {
-        if (sites.IsDefaultOrEmpty && configs.IsDefaultOrEmpty) return;
+        if (sites.IsDefaultOrEmpty && configs.IsDefaultOrEmpty && grpcSites.IsDefaultOrEmpty) return;
 
         var roots = new HashSet<string>(StringComparer.Ordinal);
         foreach (var s in sites) roots.Add(s.TargetFqn);
@@ -243,12 +290,81 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
                 queue.Enqueue(refSym);
         }
 
+        // gRPC.NET interop: for each Marshallers.Create<T>() site, try to build a model for T.
+        // Only intercept types we can FULLY serialize (no error diagnostics) — partial is unsafe.
+        // Wire format stays compatible because explicit FieldNumber consts give real proto tags.
+        var grpcInterceptable = new List<GrpcMarshallerSite>();
+        foreach (var gs in grpcSites)
+        {
+            if (typeModels.ContainsKey(gs.TargetFqn))
+            {
+                grpcInterceptable.Add(gs);
+                continue;
+            }
+            var sym = ResolveTypeByFqn(compilation, gs.TargetFqn);
+            if (sym is null || sym.TypeKind == TypeKind.Enum) continue;
+
+            var (model, refs, diags) = BuildTypeModel(sym, null);
+            if (model is null || diags.Any(d => d.Severity == DiagnosticSeverity.Error))
+            {
+                // unsupported shape (e.g. RepeatedField/MapField/oneof) — leave it to Google.Protobuf
+                spc.ReportDiagnostic(Diagnostic.Create(GrpcInteropSkipped, Location.None, sym.Name));
+                continue;
+            }
+            typeModels[gs.TargetFqn] = model;
+            foreach (var refSym in refs)
+            {
+                var rfqn = refSym.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                if (refSym.TypeKind == TypeKind.Enum)
+                {
+                    if (!enumModels.ContainsKey(rfqn)) enumModels[rfqn] = BuildEnumModel(refSym);
+                }
+                else if (!typeModels.ContainsKey(rfqn))
+                {
+                    var (rm, rrefs, _) = BuildTypeModel(refSym, null);
+                    if (rm is not null) typeModels[rfqn] = rm;
+                }
+            }
+            grpcInterceptable.Add(gs);
+        }
+
         if (typeModels.Count == 0 && enumModels.Count == 0) return;
 
         EmitInterceptsLocationAttribute(spc);
         foreach (var m in typeModels.Values) EmitSerializer(spc, m);
         if (!sites.IsDefaultOrEmpty) EmitInterceptors(spc, sites, typeModels);
+        if (grpcInterceptable.Count > 0) EmitGrpcMarshallerInterceptors(spc, grpcInterceptable, typeModels);
         EmitProtoSchemas(spc, typeModels.Values, enumModels.Values);
+    }
+
+    private static void EmitGrpcMarshallerInterceptors(SourceProductionContext spc,
+        List<GrpcMarshallerSite> grpcSites, IReadOnlyDictionary<string, TypeModel> typeModels)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("// <auto-generated/>");
+        sb.AppendLine("#nullable enable");
+        sb.AppendLine("namespace Lite.Serialization.Protobuf.Generated;");
+        sb.AppendLine();
+        sb.AppendLine("file static class __GrpcMarshallerInterceptors");
+        sb.AppendLine("{");
+        var idx = 0;
+        foreach (var gs in grpcSites)
+        {
+            if (!typeModels.TryGetValue(gs.TargetFqn, out var model)) continue;
+            var serializerFqn = $"{(string.IsNullOrEmpty(model.Namespace) ? "" : model.Namespace + ".")}{model.TypeName}__ProtoSerializer";
+
+            var paramList = string.Join(", ",
+                gs.ParamTypes.Split('|').Where(p => p.Length > 0).Select((p, i) => $"{p} __a{i}"));
+
+            sb.Append("    [global::System.Runtime.CompilerServices.InterceptsLocation(")
+              .Append(gs.InterceptVersion).Append(", \"").Append(gs.InterceptData).AppendLine("\")]");
+            sb.Append("    public static global::Grpc.Core.Marshaller<").Append(gs.TargetFqn).Append("> __GM_").Append(idx++)
+              .Append('(').Append(paramList).AppendLine(")");
+            sb.Append("        => global::").Append(serializerFqn).AppendLine(".Marshaller;");
+        }
+        sb.AppendLine("}");
+
+        spc.AddSource("__GrpcMarshallerInterceptors.g.cs", sb.ToString());
     }
 
     private static INamedTypeSymbol? ResolveTypeByFqn(CSharpCompilation compilation, string fqn)
@@ -331,9 +447,11 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
 
             int tag;
             if (configByPropName.TryGetValue(m.Name, out var ov) && ov.Tag is not null)
-                tag = ov.Tag.Value;
+                tag = ov.Tag.Value;                                  // 1) fluent config override
+            else if (TryGetExplicitFieldNumber(type, m.Name, out var fieldNumber))
+                tag = fieldNumber;                                   // 2) explicit `const int XxxFieldNumber` (Grpc.Tools-style)
             else
-                tag = ComputeProtoTag(m.Name);
+                tag = ComputeProtoTag(m.Name);                       // 3) deterministic name-hash
 
             if (seenTags.TryGetValue(tag, out var other))
             {
@@ -620,6 +738,28 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
         }
         element = null!;
         concrete = "";
+        return false;
+    }
+
+    // Looks for an explicit `public const int <PropName>FieldNumber = N;` on the type
+    // (the convention emitted by Grpc.Tools / Google.Protobuf-generated messages).
+    private static bool TryGetExplicitFieldNumber(INamedTypeSymbol type, string propName, out int tag)
+    {
+        var constName = propName + "FieldNumber";
+        var cur = type;
+        while (cur is not null)
+        {
+            foreach (var member in cur.GetMembers(constName))
+            {
+                if (member is IFieldSymbol { IsConst: true, ConstantValue: int n })
+                {
+                    tag = n;
+                    return true;
+                }
+            }
+            cur = cur.BaseType;
+        }
+        tag = 0;
         return false;
     }
 
@@ -1741,9 +1881,16 @@ namespace Lite.Serialization.Protobuf.Generated
         id: "LITEGRPC900", title: "Lite.Serialization.Protobuf generator crashed",
         messageFormat: "{0}: {1}",
         category: "LiteGrpc", defaultSeverity: DiagnosticSeverity.Error, isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor GrpcInteropSkipped = new(
+        id: "LITEGRPC100", title: "gRPC marshaller interception skipped",
+        messageFormat: "Message '{0}' has a shape Lite cannot serialize yet (repeated/map/oneof); its Marshallers.Create call is left to Google.Protobuf (wire format stays compatible).",
+        category: "LiteGrpc", defaultSeverity: DiagnosticSeverity.Info, isEnabledByDefault: true);
 }
 
 internal readonly record struct CallSite(string TargetFqn, int InterceptVersion, string InterceptData, string MethodName);
+
+internal readonly record struct GrpcMarshallerSite(string TargetFqn, int InterceptVersion, string InterceptData, string ParamTypes);
 
 internal sealed record ConfigInfo(string TargetFqn, ImmutableArray<FieldOverride> Overrides);
 

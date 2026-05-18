@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using Lite.Serialization.Protobuf;
+using Xunit;
 
 namespace Lite.Serialization.Protobuf.Tests;
 

@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace Lite.Serialization.Protobuf.Benchmarks;
 
 // POCO struct — value type, zero GC alloc on instance, our lib's strength
