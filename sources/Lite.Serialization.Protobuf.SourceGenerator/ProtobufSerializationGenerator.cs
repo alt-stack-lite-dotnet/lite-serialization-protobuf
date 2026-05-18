@@ -63,14 +63,19 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
         });
     }
 
-    private static bool IsGenericCall(InvocationExpressionSyntax inv, string name)
+    // Extracts the invoked method's simple name, whether the call is `Foo(...)`, `Foo<T>(...)`,
+    // `x.Foo(...)` or `x.Foo<T>(...)`. Type arguments may be explicit OR inferred — the semantic
+    // model in the transform step resolves the real symbol either way.
+    private static string? GetInvokedSimpleName(InvocationExpressionSyntax inv) => inv.Expression switch
     {
-        if (inv.Expression is GenericNameSyntax g)
-            return g.Identifier.Text == name && g.TypeArgumentList.Arguments.Count == 1;
-        if (inv.Expression is MemberAccessExpressionSyntax ma && ma.Name is GenericNameSyntax gma)
-            return gma.Identifier.Text == name && gma.TypeArgumentList.Arguments.Count == 1;
-        return false;
-    }
+        IdentifierNameSyntax id => id.Identifier.Text,
+        GenericNameSyntax g => g.Identifier.Text,
+        MemberAccessExpressionSyntax { Name: { } n } => n.Identifier.Text,
+        _ => null,
+    };
+
+    private static bool IsGenericCall(InvocationExpressionSyntax inv, string name) =>
+        GetInvokedSimpleName(inv) == name;
 
     private static GrpcMarshallerSite? TryExtractMarshallerSite(GeneratorSyntaxContext ctx, CancellationToken ct)
     {
@@ -102,11 +107,8 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
     private static bool LooksLikeForCall(SyntaxNode node)
     {
         if (node is not InvocationExpressionSyntax inv) return false;
-        if (inv.Expression is GenericNameSyntax g)
-            return InterceptedMethodNames.Contains(g.Identifier.Text) && g.TypeArgumentList.Arguments.Count == 1;
-        if (inv.Expression is MemberAccessExpressionSyntax ma && ma.Name is GenericNameSyntax gma)
-            return InterceptedMethodNames.Contains(gma.Identifier.Text) && gma.TypeArgumentList.Arguments.Count == 1;
-        return false;
+        var name = GetInvokedSimpleName(inv);
+        return name is not null && InterceptedMethodNames.Contains(name);
     }
 
     private static CallSite? TryExtractCallSite(GeneratorSyntaxContext ctx, CancellationToken ct)
@@ -119,31 +121,35 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
         if (method.TypeArguments[0] is not INamedTypeSymbol target) return null;
         if (target.IsAbstract || target.IsStatic || target.TypeKind == TypeKind.Interface) return null;
 
-        // Deserialize has multiple overloads; only intercept the ReadOnlySequence<byte> one for now
-        if (method.Name == "Deserialize")
-        {
-            if (method.Parameters.Length != 1) return null;
-            var pType = method.Parameters[0].Type.ToDisplayString();
-            if (pType != "System.Buffers.ReadOnlySequence<byte>") return null;
-        }
-
-        // Serialize has overloads: (in T, IBufferWriter) and (in T) -> byte[]
-        // Disambiguate by tagging method name with arity
+        // Overloaded methods are disambiguated by tagging the resolved method name with a variant.
         string tagName;
         if (method.Name == "Serialize")
         {
+            // Serialize(in T) -> byte[]   vs   Serialize(in T, IBufferWriter<byte>) -> void
             tagName = method.Parameters.Length switch
             {
-                1 => "SerializeReturning", // -> byte[]
-                2 => "Serialize", // -> void with IBufferWriter
+                1 => "SerializeReturning",
+                2 => "Serialize",
                 _ => "",
             };
-            if (tagName == "") return null;
+        }
+        else if (method.Name == "Deserialize")
+        {
+            // Deserialize(ReadOnlySequence<byte>) / (ReadOnlySpan<byte>) / (byte[])
+            if (method.Parameters.Length != 1) return null;
+            tagName = method.Parameters[0].Type.ToDisplayString() switch
+            {
+                "System.Buffers.ReadOnlySequence<byte>" => "Deserialize",
+                "System.ReadOnlySpan<byte>" => "DeserializeSpan",
+                "byte[]" => "DeserializeBytes",
+                _ => "",
+            };
         }
         else
         {
             tagName = method.Name;
         }
+        if (tagName.Length == 0) return null;
 
         var loc = ctx.SemanticModel.GetInterceptableLocation(inv, ct);
         if (loc is null) return null;
@@ -1703,6 +1709,14 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
                 case "Deserialize":
                     sb.Append("    public static ").Append(site.TargetFqn).Append(" __Des_").Append(idx++).AppendLine("(global::System.Buffers.ReadOnlySequence<byte> source)");
                     sb.Append("        => global::").Append(serializerFqn).AppendLine(".ReadFrom(source);");
+                    break;
+                case "DeserializeSpan":
+                    sb.Append("    public static ").Append(site.TargetFqn).Append(" __DesSpan_").Append(idx++).AppendLine("(global::System.ReadOnlySpan<byte> source)");
+                    sb.Append("        => global::").Append(serializerFqn).AppendLine(".ReadFromSpan(source);");
+                    break;
+                case "DeserializeBytes":
+                    sb.Append("    public static ").Append(site.TargetFqn).Append(" __DesBytes_").Append(idx++).AppendLine("(byte[] source)");
+                    sb.Append("        => global::").Append(serializerFqn).AppendLine(".ReadFromSpan(source);");
                     break;
                 default: // For
                     sb.Append("    public static global::Lite.Serialization.Protobuf.IProtoSerializer<").Append(site.TargetFqn).Append("> __For_").Append(idx++).AppendLine("()");

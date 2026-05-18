@@ -63,7 +63,11 @@ public static class LiteSerializer
 
     public static Marshaller<T> CreateMarshaller<T>(IProtoSerializer<T> serializer) =>
         new Marshaller<T>(
-            serializer: (value, ctx) => serializer.WriteTo(value, ctx.GetBufferWriter()),
+            serializer: (value, ctx) =>
+            {
+                serializer.WriteTo(value, ctx.GetBufferWriter());
+                ctx.Complete(); // required: signals the gRPC SerializationContext the payload is done
+            },
             deserializer: ctx => serializer.ReadFrom(ctx.PayloadAsReadOnlySequence())
         );
 
