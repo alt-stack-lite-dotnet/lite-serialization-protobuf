@@ -22,7 +22,7 @@ public class ApiSurfaceTests
     {
         var v = Sample();
         int computed = LiteSerializer.ComputeSize<LiteScalars>(in v);
-        byte[] bytes = LiteSerializer.Serialize<LiteScalars>(in v);
+        byte[] bytes = LiteSerializer.For<LiteScalars>().Serialize(v);
         Assert.Equal(bytes.Length, computed);
     }
 
@@ -31,10 +31,10 @@ public class ApiSurfaceTests
     {
         var v = Sample();
 
-        byte[] viaByteArray = LiteSerializer.Serialize<LiteScalars>(in v);
+        byte[] viaByteArray = LiteSerializer.For<LiteScalars>().Serialize(v);
 
         var bw = new ArrayBufferWriter<byte>();
-        LiteSerializer.Serialize<LiteScalars>(in v, bw);
+        LiteSerializer.SerializeTo<LiteScalars>(in v, bw);
         byte[] viaWriter = bw.WrittenSpan.ToArray();
 
         var dst = new byte[LiteSerializer.ComputeSize<LiteScalars>(in v)];
@@ -55,11 +55,11 @@ public class ApiSurfaceTests
     public void AllDeserializePaths_ProduceEqualValues()
     {
         var v = Sample();
-        byte[] bytes = LiteSerializer.Serialize<LiteScalars>(in v);
+        byte[] bytes = LiteSerializer.For<LiteScalars>().Serialize(v);
 
-        var fromBytes = LiteSerializer.Deserialize<LiteScalars>(bytes);
-        var fromSpan = LiteSerializer.Deserialize<LiteScalars>(bytes.AsSpan());
-        var fromSeq = LiteSerializer.Deserialize<LiteScalars>(new ReadOnlySequence<byte>(bytes));
+        var fromBytes = LiteSerializer.DeserializeFrom<LiteScalars>(bytes);
+        var fromSpan = LiteSerializer.DeserializeFrom<LiteScalars>(bytes.AsSpan());
+        var fromSeq = LiteSerializer.DeserializeFrom<LiteScalars>(new ReadOnlySequence<byte>(bytes));
 
         foreach (var rt in new[] { fromBytes, fromSpan, fromSeq })
         {
@@ -76,7 +76,7 @@ public class ApiSurfaceTests
     public void Deserialize_FromMultiSegmentSequence_Works()
     {
         var v = Sample();
-        byte[] bytes = LiteSerializer.Serialize<LiteScalars>(in v);
+        byte[] bytes = LiteSerializer.For<LiteScalars>().Serialize(v);
 
         // Split into two segments to exercise the non-single-segment ReadFrom path.
         int mid = bytes.Length / 2;
@@ -85,7 +85,7 @@ public class ApiSurfaceTests
         var seq = new ReadOnlySequence<byte>(first, 0, second, bytes.Length - mid);
         Assert.False(seq.IsSingleSegment);
 
-        var rt = LiteSerializer.Deserialize<LiteScalars>(seq);
+        var rt = LiteSerializer.DeserializeFrom<LiteScalars>(seq);
         Assert.Equal(v.Text, rt.Text);
         Assert.Equal(v.I64, rt.I64);
         Assert.Equal(v.Blob, rt.Blob);

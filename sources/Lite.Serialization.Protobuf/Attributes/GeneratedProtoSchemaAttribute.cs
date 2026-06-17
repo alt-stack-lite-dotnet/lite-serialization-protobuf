@@ -1,16 +1,8 @@
-using System;
+namespace Lite.Serialization.Protobuf.Attributes;
 
-namespace Lite.Serialization.Protobuf;
-
-[AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true, Inherited = false)]
-public sealed class GeneratedProtoSchemaAttribute : Attribute
+[AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
+public sealed class GeneratedProtoSchemaAttribute(string fileName, string content) : Attribute
 {
-    public string FileName { get; }
-    public string Content { get; }
-
-    public GeneratedProtoSchemaAttribute(string fileName, string content)
-    {
-        FileName = fileName;
-        Content = content;
-    }
+    public string FileName => fileName;
+    public string Content => content;
 }

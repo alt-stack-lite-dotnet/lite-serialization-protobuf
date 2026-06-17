@@ -45,10 +45,10 @@ public class ConfigOverrideTests
     public void TagOverride_MovesFieldOnTheWire()
     {
         var msg = new ConfiguredMessage { Id = 123 };
-        byte[] bytes = LiteSerializer.Serialize<ConfiguredMessage>(in msg);
+        byte[] bytes = LiteSerializer.For<ConfiguredMessage>().Serialize(msg);
 
         // Read through a type that expects the value at tag 100.
-        var probe = LiteSerializer.Deserialize<TagProbe>(bytes);
+        var probe = LiteSerializer.DeserializeFrom<TagProbe>(bytes);
         Assert.Equal(123, probe.Value);
     }
 
@@ -65,7 +65,7 @@ public class ConfigOverrideTests
         Assert.DoesNotContain("hidden", schema);
 
         var msg = new ConfiguredMessage { Id = 1, Visible = "v", Hidden = "secret" };
-        var rt = LiteSerializer.Deserialize<ConfiguredMessage>(LiteSerializer.Serialize<ConfiguredMessage>(in msg));
+        var rt = LiteSerializer.DeserializeFrom<ConfiguredMessage>(LiteSerializer.For<ConfiguredMessage>().Serialize(msg));
         Assert.Equal("v", rt.Visible);
         Assert.Equal("", rt.Hidden); // never serialized
     }
@@ -82,7 +82,7 @@ public class ConfigOverrideTests
     public void ConfiguredMessage_StillRoundTrips()
     {
         var msg = new ConfiguredMessage { Id = 9, Visible = "hi", Renamed = 5 };
-        var rt = LiteSerializer.Deserialize<ConfiguredMessage>(LiteSerializer.Serialize<ConfiguredMessage>(in msg));
+        var rt = LiteSerializer.DeserializeFrom<ConfiguredMessage>(LiteSerializer.For<ConfiguredMessage>().Serialize(msg));
         Assert.Equal(9, rt.Id);
         Assert.Equal("hi", rt.Visible);
         Assert.Equal(5, rt.Renamed);

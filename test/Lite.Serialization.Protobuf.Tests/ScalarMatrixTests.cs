@@ -41,7 +41,7 @@ public sealed class NullableBag
 public class ScalarMatrixTests
 {
     private static ScalarBag Roundtrip(ScalarBag v) =>
-        LiteSerializer.Deserialize<ScalarBag>(LiteSerializer.Serialize<ScalarBag>(in v));
+        LiteSerializer.DeserializeFrom<ScalarBag>(LiteSerializer.For<ScalarBag>().Serialize(v));
 
     [Fact]
     public void MaxBoundaries_RoundTrip()
@@ -126,7 +126,7 @@ public class ScalarMatrixTests
     public void Nullable_NonNull_RoundTrips()
     {
         var v = new NullableBag { I = 5, B = true, L = -9, En = Status.Disabled, Dt = DateTime.UtcNow };
-        var rt = LiteSerializer.Deserialize<NullableBag>(LiteSerializer.Serialize<NullableBag>(in v));
+        var rt = LiteSerializer.DeserializeFrom<NullableBag>(LiteSerializer.For<NullableBag>().Serialize(v));
         Assert.Equal(5, rt.I);
         Assert.True(rt.B);
         Assert.Equal(-9, rt.L);
@@ -138,7 +138,7 @@ public class ScalarMatrixTests
     public void Nullable_AllNull_RoundTripsAsNull()
     {
         var v = new NullableBag();
-        var rt = LiteSerializer.Deserialize<NullableBag>(LiteSerializer.Serialize<NullableBag>(in v));
+        var rt = LiteSerializer.DeserializeFrom<NullableBag>(LiteSerializer.For<NullableBag>().Serialize(v));
         Assert.Null(rt.I);
         Assert.Null(rt.B);
         Assert.Null(rt.L);

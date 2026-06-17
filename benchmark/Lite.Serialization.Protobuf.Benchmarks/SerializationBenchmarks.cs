@@ -43,7 +43,7 @@ public class SerializeBenchmarks
     public int LiteStruct_SerializeStatic()
     {
         var w = new ArrayBufferWriter<byte>(64);
-        LiteSerializer.Serialize<BenchUserStruct>(in LiteStruct, w);
+        LiteSerializer.SerializeTo<BenchUserStruct>(in LiteStruct, w);
         return w.WrittenCount;
     }
 
@@ -51,16 +51,16 @@ public class SerializeBenchmarks
     public int LiteClass_SerializeStatic()
     {
         var w = new ArrayBufferWriter<byte>(64);
-        LiteSerializer.Serialize<BenchUserClass>(in LiteClass, w);
+        LiteSerializer.SerializeTo<BenchUserClass>(in LiteClass, w);
         return w.WrittenCount;
     }
 
     // Apples-to-apples vs Google.ToByteArray() — exact-size byte[] allocation, no ArrayBufferWriter
     [Benchmark(Description = "Lite struct → byte[] (intercepted, exact-size)")]
-    public byte[] LiteStruct_SerializeByteArray() => LiteSerializer.Serialize<BenchUserStruct>(in LiteStruct);
+    public byte[] LiteStruct_SerializeByteArray() => LiteSerializer.For<BenchUserStruct>().Serialize(LiteStruct);
 
     [Benchmark(Description = "Lite class → byte[] (intercepted, exact-size)")]
-    public byte[] LiteClass_SerializeByteArray() => LiteSerializer.Serialize<BenchUserClass>(in LiteClass);
+    public byte[] LiteClass_SerializeByteArray() => LiteSerializer.For<BenchUserClass>().Serialize(LiteClass);
 
     // Zero-alloc: caller provides buffer (reused across calls)
     private readonly byte[] _reusedBuf = new byte[256];
@@ -140,29 +140,29 @@ public class DeserializeBenchmarks
 
     [Benchmark(Description = "Lite struct ← static (intercepted)")]
     public BenchUserStruct LiteStruct_DeserializeStatic() =>
-        LiteSerializer.Deserialize<BenchUserStruct>(new ReadOnlySequence<byte>(LiteStructBytes));
+        LiteSerializer.DeserializeFrom<BenchUserStruct>(new ReadOnlySequence<byte>(LiteStructBytes));
 
     [Benchmark(Description = "Lite class ← static (intercepted)")]
     public BenchUserClass LiteClass_DeserializeStatic() =>
-        LiteSerializer.Deserialize<BenchUserClass>(new ReadOnlySequence<byte>(LiteClassBytes));
+        LiteSerializer.DeserializeFrom<BenchUserClass>(new ReadOnlySequence<byte>(LiteClassBytes));
 
     // Record class (primary ctor → ctor-mode deserialize)
     private static readonly BenchUserRecord _liteRecord = new(42, "alice", "alice@example.com", true, 30,
         new List<string> { "admin", "developer", "remote" });
-    private static readonly byte[] LiteRecordBytes = LiteSerializer.Serialize<BenchUserRecord>(in _liteRecord);
+    private static readonly byte[] LiteRecordBytes = LiteSerializer.For<BenchUserRecord>().Serialize(_liteRecord);
 
     [Benchmark(Description = "Lite record class ← static (intercepted)")]
     public BenchUserRecord LiteRecord_DeserializeStatic() =>
-        LiteSerializer.Deserialize<BenchUserRecord>(new ReadOnlySequence<byte>(LiteRecordBytes));
+        LiteSerializer.DeserializeFrom<BenchUserRecord>(new ReadOnlySequence<byte>(LiteRecordBytes));
 
     // Record struct (primary ctor, value type → ctor-mode deserialize, returned by value)
     private static readonly BenchUserRecordStruct _liteRecordStruct = new(42, "alice", "alice@example.com", true, 30,
         new List<string> { "admin", "developer", "remote" });
-    private static readonly byte[] LiteRecordStructBytes = LiteSerializer.Serialize<BenchUserRecordStruct>(in _liteRecordStruct);
+    private static readonly byte[] LiteRecordStructBytes = LiteSerializer.For<BenchUserRecordStruct>().Serialize(_liteRecordStruct);
 
     [Benchmark(Description = "Lite record struct ← static (intercepted)")]
     public BenchUserRecordStruct LiteRecordStruct_DeserializeStatic() =>
-        LiteSerializer.Deserialize<BenchUserRecordStruct>(new ReadOnlySequence<byte>(LiteRecordStructBytes));
+        LiteSerializer.DeserializeFrom<BenchUserRecordStruct>(new ReadOnlySequence<byte>(LiteRecordStructBytes));
 
     private static BenchUserStruct SerializeBenchmarks_GetStruct() => new()
     {

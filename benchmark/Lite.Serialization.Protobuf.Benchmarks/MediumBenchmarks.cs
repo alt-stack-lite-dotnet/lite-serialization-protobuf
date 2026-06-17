@@ -22,7 +22,7 @@ public class MediumSerializeBenchmarks
     public byte[] ProtobufNet() => Pn.ToBytes(_pn);
 
     [Benchmark(Description = "Lite (POCO class)")]
-    public byte[] Lite() => LiteSerializer.Serialize<BenchMediumClass>(in _lite);
+    public byte[] Lite() => LiteSerializer.For<BenchMediumClass>().Serialize(_lite);
 }
 
 [MemoryDiagnoser]
@@ -32,7 +32,7 @@ public class MediumDeserializeBenchmarks
     private static byte[] LiteBytes()
     {
         var v = BenchData.MediumLite();
-        return LiteSerializer.Serialize<BenchMediumClass>(in v);
+        return LiteSerializer.For<BenchMediumClass>().Serialize(v);
     }
 
     private static readonly byte[] _googleBytes = BenchData.MediumGoogle().ToByteArray();
@@ -46,5 +46,5 @@ public class MediumDeserializeBenchmarks
     public PnMedium ProtobufNet() => Pn.From<PnMedium>(_pnBytes);
 
     [Benchmark(Description = "Lite (POCO class)")]
-    public BenchMediumClass Lite() => LiteSerializer.Deserialize<BenchMediumClass>(new ReadOnlySequence<byte>(_liteBytes));
+    public BenchMediumClass Lite() => LiteSerializer.DeserializeFrom<BenchMediumClass>(new ReadOnlySequence<byte>(_liteBytes));
 }

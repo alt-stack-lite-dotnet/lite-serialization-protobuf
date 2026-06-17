@@ -7,7 +7,7 @@ const string dbPath = "todos.bin";
 
 // ── Load: deserialize the whole store from disk (or start fresh) ──
 TodoStore store = File.Exists(dbPath)
-    ? LiteSerializer.Deserialize<TodoStore>(File.ReadAllBytes(dbPath))
+    ? LiteSerializer.DeserializeFrom<TodoStore>(File.ReadAllBytes(dbPath))
     : new TodoStore();
 
 Console.WriteLine($"Loaded {store.Items.Count} task(s) from {dbPath}");
@@ -18,8 +18,10 @@ Add(store, "Write the README");
 Add(store, "Tag the 1.0 release");
 Complete(store, id: 2);
 
-// ── Save: serialize the whole store back to disk ──
-File.WriteAllBytes(dbPath, LiteSerializer.Serialize(in store));
+// ── Save: serialize the whole store back to disk (size a buffer, write into it) ──
+var bytes = new byte[LiteSerializer.ComputeSize(in store)];
+LiteSerializer.SerializeTo(in store, bytes);
+File.WriteAllBytes(dbPath, bytes);
 Console.WriteLine($"Saved {store.Items.Count} task(s) → {dbPath} ({new FileInfo(dbPath).Length} bytes)");
 
 // ── Show ──

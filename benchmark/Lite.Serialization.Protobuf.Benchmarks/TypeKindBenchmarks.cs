@@ -23,19 +23,19 @@ public class TypeKindSerializeBenchmarks
     public byte[] Google() => _google.ToByteArray();
 
     [Benchmark(Description = "Lite class")]
-    public byte[] Class() => LiteSerializer.Serialize<BenchUserClass>(in _class);
+    public byte[] Class() => LiteSerializer.For<BenchUserClass>().Serialize(_class);
 
     [Benchmark(Description = "Lite struct")]
-    public byte[] Struct() => LiteSerializer.Serialize<BenchUserStruct>(in _struct);
+    public byte[] Struct() => LiteSerializer.For<BenchUserStruct>().Serialize(_struct);
 
     [Benchmark(Description = "Lite record class")]
-    public byte[] Record() => LiteSerializer.Serialize<BenchUserRecord>(in _record);
+    public byte[] Record() => LiteSerializer.For<BenchUserRecord>().Serialize(_record);
 
     [Benchmark(Description = "Lite record struct")]
-    public byte[] RecordStruct() => LiteSerializer.Serialize<BenchUserRecordStruct>(in _recordStruct);
+    public byte[] RecordStruct() => LiteSerializer.For<BenchUserRecordStruct>().Serialize(_recordStruct);
 
     [Benchmark(Description = "Lite readonly record struct")]
-    public byte[] ReadonlyRecordStruct() => LiteSerializer.Serialize<BenchUserReadonlyRecordStruct>(in _roRecordStruct);
+    public byte[] ReadonlyRecordStruct() => LiteSerializer.For<BenchUserReadonlyRecordStruct>().Serialize(_roRecordStruct);
 }
 
 [MemoryDiagnoser]
@@ -55,17 +55,17 @@ public class TypeKindDeserializeBenchmarks
     public BenchUser Google() => BenchUser.Parser.ParseFrom(_googleBytes);
 
     [Benchmark(Description = "Lite class")]
-    public BenchUserClass Class() => LiteSerializer.Deserialize<BenchUserClass>(new ReadOnlySequence<byte>(_class));
+    public BenchUserClass Class() => LiteSerializer.DeserializeFrom<BenchUserClass>(new ReadOnlySequence<byte>(_class));
 
     [Benchmark(Description = "Lite struct")]
-    public BenchUserStruct Struct() => LiteSerializer.Deserialize<BenchUserStruct>(new ReadOnlySequence<byte>(_struct));
+    public BenchUserStruct Struct() => LiteSerializer.DeserializeFrom<BenchUserStruct>(new ReadOnlySequence<byte>(_struct));
 
     [Benchmark(Description = "Lite record class")]
-    public BenchUserRecord Record() => LiteSerializer.Deserialize<BenchUserRecord>(new ReadOnlySequence<byte>(_record));
+    public BenchUserRecord Record() => LiteSerializer.DeserializeFrom<BenchUserRecord>(new ReadOnlySequence<byte>(_record));
 
     [Benchmark(Description = "Lite record struct")]
-    public BenchUserRecordStruct RecordStruct() => LiteSerializer.Deserialize<BenchUserRecordStruct>(new ReadOnlySequence<byte>(_recordStruct));
+    public BenchUserRecordStruct RecordStruct() => LiteSerializer.DeserializeFrom<BenchUserRecordStruct>(new ReadOnlySequence<byte>(_recordStruct));
 
     [Benchmark(Description = "Lite readonly record struct")]
-    public BenchUserReadonlyRecordStruct ReadonlyRecordStruct() => LiteSerializer.Deserialize<BenchUserReadonlyRecordStruct>(new ReadOnlySequence<byte>(_roRecordStruct));
+    public BenchUserReadonlyRecordStruct ReadonlyRecordStruct() => LiteSerializer.DeserializeFrom<BenchUserReadonlyRecordStruct>(new ReadOnlySequence<byte>(_roRecordStruct));
 }

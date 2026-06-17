@@ -1,6 +1,5 @@
-using System.Collections.Generic;
-using System.IO;
 using System.Reflection;
+using Lite.Serialization.Protobuf.Attributes;
 
 namespace Lite.Serialization.Protobuf;
 
@@ -11,13 +10,5 @@ public static class ProtoSchemaRegistry
         assembly ??= Assembly.GetCallingAssembly();
         foreach (var attr in assembly.GetCustomAttributes<GeneratedProtoSchemaAttribute>())
             yield return (attr.FileName, attr.Content);
-    }
-
-    public static void DumpToDirectory(string directory, Assembly? assembly = null)
-    {
-        assembly ??= Assembly.GetCallingAssembly();
-        Directory.CreateDirectory(directory);
-        foreach (var (fileName, content) in Enumerate(assembly))
-            File.WriteAllText(Path.Combine(directory, fileName), content);
     }
 }

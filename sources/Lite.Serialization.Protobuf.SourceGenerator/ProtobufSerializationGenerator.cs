@@ -100,7 +100,7 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
     // ----- Discovery: LiteSerializer.For/MarshallerFor/Serialize/Deserialize<T>() call sites -----
     private static readonly HashSet<string> InterceptedMethodNames = new(StringComparer.Ordinal)
     {
-        "For", "MarshallerFor", "Serialize", "Deserialize", "SerializeTo", "ComputeSize", "SerializeRented",
+        "For", "MarshallerFor", "SerializeTo", "DeserializeFrom", "ComputeSize", "SerializeRented",
     };
 
     private static bool LooksLikeForCall(SyntaxNode node)
@@ -122,25 +122,25 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
 
         // Overloaded methods are disambiguated by tagging the resolved method name with a variant.
         string tagName;
-        if (method.Name == "Serialize")
+        if (method.Name == "SerializeTo")
         {
-            // Serialize(in T) -> byte[]   vs   Serialize(in T, IBufferWriter<byte>) -> void
-            tagName = method.Parameters.Length switch
+            // SerializeTo(in T, Span<byte>) -> int   vs   SerializeTo(in T, IBufferWriter<byte>) -> void
+            if (method.Parameters.Length != 2) return null;
+            tagName = method.Parameters[1].Type.ToDisplayString() switch
             {
-                1 => "SerializeReturning",
-                2 => "Serialize",
+                "System.Span<byte>" => "SerializeTo",
+                "System.Buffers.IBufferWriter<byte>" => "SerializeToWriter",
                 _ => "",
             };
         }
-        else if (method.Name == "Deserialize")
+        else if (method.Name == "DeserializeFrom")
         {
-            // Deserialize(ReadOnlySequence<byte>) / (ReadOnlySpan<byte>) / (byte[])
+            // DeserializeFrom(ReadOnlySpan<byte>) / (ReadOnlySequence<byte>)
             if (method.Parameters.Length != 1) return null;
             tagName = method.Parameters[0].Type.ToDisplayString() switch
             {
-                "System.Buffers.ReadOnlySequence<byte>" => "Deserialize",
-                "System.ReadOnlySpan<byte>" => "DeserializeSpan",
-                "byte[]" => "DeserializeBytes",
+                "System.ReadOnlySpan<byte>" => "DeserializeFromSpan",
+                "System.Buffers.ReadOnlySequence<byte>" => "DeserializeFromSeq",
                 _ => "",
             };
         }
@@ -1737,18 +1737,9 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
                     sb.Append("    public static global::Grpc.Core.Marshaller<").Append(site.TargetFqn).Append("> __MFor_").Append(idx++).AppendLine("()");
                     sb.Append("        => global::").Append(serializerFqn).AppendLine(".Marshaller;");
                     break;
-                case "Serialize":
-                    sb.Append("    public static void __Ser_").Append(idx++).Append("(in ").Append(site.TargetFqn).AppendLine(" value, global::System.Buffers.IBufferWriter<byte> writer)");
+                case "SerializeToWriter":
+                    sb.Append("    public static void __SerW_").Append(idx++).Append("(in ").Append(site.TargetFqn).AppendLine(" value, global::System.Buffers.IBufferWriter<byte> writer)");
                     sb.Append("        => global::").Append(serializerFqn).AppendLine(".WriteTo(in value, writer);");
-                    break;
-                case "SerializeReturning":
-                    sb.Append("    public static byte[] __SerR_").Append(idx++).Append("(in ").Append(site.TargetFqn).AppendLine(" value)");
-                    sb.AppendLine("    {");
-                    sb.Append("        var __sz = global::").Append(serializerFqn).AppendLine(".ComputeSize(value);");
-                    sb.AppendLine("        var __r = new byte[__sz];");
-                    sb.Append("        global::").Append(serializerFqn).AppendLine(".WriteToSpan(in value, __r);");
-                    sb.AppendLine("        return __r;");
-                    sb.AppendLine("    }");
                     break;
                 case "SerializeTo":
                     sb.Append("    public static int __SerTo_").Append(idx++).Append("(in ").Append(site.TargetFqn).AppendLine(" value, global::System.Span<byte> destination)");
@@ -1767,16 +1758,12 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
                     sb.AppendLine("        return new global::Lite.Serialization.Protobuf.RentedBuffer(__owner, __wrote);");
                     sb.AppendLine("    }");
                     break;
-                case "Deserialize":
-                    sb.Append("    public static ").Append(site.TargetFqn).Append(" __Des_").Append(idx++).AppendLine("(global::System.Buffers.ReadOnlySequence<byte> source)");
+                case "DeserializeFromSeq":
+                    sb.Append("    public static ").Append(site.TargetFqn).Append(" __DesSeq_").Append(idx++).AppendLine("(global::System.Buffers.ReadOnlySequence<byte> source)");
                     sb.Append("        => global::").Append(serializerFqn).AppendLine(".ReadFrom(source);");
                     break;
-                case "DeserializeSpan":
+                case "DeserializeFromSpan":
                     sb.Append("    public static ").Append(site.TargetFqn).Append(" __DesSpan_").Append(idx++).AppendLine("(global::System.ReadOnlySpan<byte> source)");
-                    sb.Append("        => global::").Append(serializerFqn).AppendLine(".ReadFromSpan(source);");
-                    break;
-                case "DeserializeBytes":
-                    sb.Append("    public static ").Append(site.TargetFqn).Append(" __DesBytes_").Append(idx++).AppendLine("(byte[] source)");
                     sb.Append("        => global::").Append(serializerFqn).AppendLine(".ReadFromSpan(source);");
                     break;
                 default: // For
@@ -1840,7 +1827,7 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
                 }
             }
 
-            outer.Append("[assembly: global::Lite.Serialization.Protobuf.GeneratedProtoSchemaAttribute(")
+            outer.Append("[assembly: global::Lite.Serialization.Protobuf.Attributes.GeneratedProtoSchemaAttribute(")
                  .Append(EscapeStringLiteral(fileName)).Append(", ").Append(EscapeStringLiteral(proto.ToString())).AppendLine(")]");
         }
 

@@ -41,19 +41,19 @@ internal static class SizeReport
     private static int LiteSmall()
     {
         var v = BenchData.UserClass();
-        return LiteSerializer.Serialize<BenchUserClass>(in v).Length;
+        return LiteSerializer.For<BenchUserClass>().Serialize(v).Length;
     }
 
     private static int LiteMedium()
     {
         var v = BenchData.MediumLite();
-        return LiteSerializer.Serialize<BenchMediumClass>(in v).Length;
+        return LiteSerializer.For<BenchMediumClass>().Serialize(v).Length;
     }
 
     private static int LiteLarge()
     {
         var v = BenchData.LargeLite();
-        return LiteSerializer.Serialize<BenchLargeClass>(in v).Length;
+        return LiteSerializer.For<BenchLargeClass>().Serialize(v).Length;
     }
 
     private static void Row(string name, int google, int pn, int lite) =>

@@ -38,7 +38,7 @@ would cost more than it saves.
 
 ## Reach for the zero-allocation path on hot loops
 
-`Serialize → byte[]` allocates exactly the result array. To allocate nothing, provide the buffer:
+There is no `byte[]`-returning API — you always provide the buffer, so serialization allocates nothing:
 
 ```csharp
 // small — on the stack
@@ -69,7 +69,7 @@ Protobuf's compatibility holds only if numbers are stable:
 
 ## Keep `T` concrete at the call site
 
-`LiteSerializer.Serialize<T>(...)` is intercepted by field number at the call site, so `T` must be a
-concrete type there. A generic wrapper `void Send<T>(T v) => LiteSerializer.Serialize(in v)` won't be
+`LiteSerializer.SerializeTo<T>(...)` is intercepted at the call site, so `T` must be a concrete type
+there. A generic wrapper `void Send<T>(T v) => LiteSerializer.SerializeTo(in v, buf)` won't be
 intercepted (a C# 12 interceptor limitation). Call with the concrete type, or expose
 `IProtoSerializer<T>` from `For<T>()` at a concrete boundary.

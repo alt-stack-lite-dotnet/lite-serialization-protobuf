@@ -10,7 +10,7 @@ your own concern — Lite gives you the marshaller and the message types, you wi
 
 ## Why
 
-- **Zero ceremony** — call `LiteSerializer.Serialize<T>(in value)` on a normal class; the source
+- **Zero ceremony** — call `LiteSerializer.SerializeTo<T>(in value, buffer)` on a normal class; the source
   generator emits a specialized serializer at compile time (no reflection, no runtime model build).
 - **Fast & low-alloc** — exact-size two-pass writing, pooled buffers, and zero-allocation
   `SerializeTo(Span)`. Competitive with (often faster than) Google.Protobuf and protobuf-net.

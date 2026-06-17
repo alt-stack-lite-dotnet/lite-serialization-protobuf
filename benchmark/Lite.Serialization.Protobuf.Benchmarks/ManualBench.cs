@@ -13,7 +13,6 @@ namespace Lite.Serialization.Protobuf.Benchmarks;
 internal static class ManualBench
 {
     private static readonly byte[] _scratch = new byte[64 * 1024];
-    private static byte[]? _sink; // prevents the baseline allocation from being optimized away
 
     public static void Run()
     {
@@ -29,21 +28,20 @@ internal static class ManualBench
         var lUser = BenchData.UserClass();
         var gUserB = gUser.ToByteArray();
         var pUserB = Pn.ToBytes(pUser);
-        var lUserB = LiteSerializer.Serialize<BenchUserClass>(in lUser);
+        var lUserB = LiteSerializer.For<BenchUserClass>().Serialize(lUser);
 
-        Section("Small (BenchUser) — Serialize, by buffer strategy");
-        Row("baseline: new byte[58], NO serialization", 1_000_000, () => { _sink = new byte[58]; });
+        // Competitors return a freshly-allocated byte[]; Lite writes into a caller buffer (0 alloc).
+        Section("Small (BenchUser) — Serialize");
         Row("Google.Protobuf -> byte[]", 1_000_000, () => gUser.ToByteArray());
         Row("protobuf-net -> byte[]", 1_000_000, () => Pn.ToBytes(pUser));
-        Row("Lite -> byte[] (88 B = the RESULT array)", 1_000_000, () => LiteSerializer.Serialize<BenchUserClass>(in lUser));
-        Row("Lite -> SerializeTo + stackalloc", 1_000_000, () => { Span<byte> __b = stackalloc byte[128]; LiteSerializer.SerializeTo<BenchUserClass>(in lUser, __b); });
-        Row("Lite -> SerializeTo + ArrayPool", 1_000_000, () => { var __a = System.Buffers.ArrayPool<byte>.Shared.Rent(128); LiteSerializer.SerializeTo<BenchUserClass>(in lUser, __a); System.Buffers.ArrayPool<byte>.Shared.Return(__a); });
-        Row("Lite -> SerializeTo + reused buffer", 1_000_000, () => LiteSerializer.SerializeTo<BenchUserClass>(in lUser, _scratch));
+        Row("Lite SerializeTo + stackalloc", 1_000_000, () => { Span<byte> __b = stackalloc byte[128]; LiteSerializer.SerializeTo<BenchUserClass>(in lUser, __b); });
+        Row("Lite SerializeTo + ArrayPool", 1_000_000, () => { var __a = System.Buffers.ArrayPool<byte>.Shared.Rent(128); LiteSerializer.SerializeTo<BenchUserClass>(in lUser, __a); System.Buffers.ArrayPool<byte>.Shared.Return(__a); });
+        Row("Lite SerializeTo + reused buffer", 1_000_000, () => LiteSerializer.SerializeTo<BenchUserClass>(in lUser, _scratch));
 
         Section("Small (BenchUser) — Deserialize");
         Row("Google.Protobuf (IMessage)", 1_000_000, () => BenchUser.Parser.ParseFrom(gUserB));
         Row("protobuf-net", 1_000_000, () => Pn.From<PnUser>(pUserB));
-        Row("Lite (class)", 1_000_000, () => LiteSerializer.Deserialize<BenchUserClass>(new ReadOnlySequence<byte>(lUserB)));
+        Row("Lite (class)", 1_000_000, () => LiteSerializer.DeserializeFrom<BenchUserClass>(new ReadOnlySequence<byte>(lUserB)));
 
         // ───────── Medium ─────────
         var gMed = BenchData.MediumGoogle();
@@ -51,17 +49,17 @@ internal static class ManualBench
         var lMed = BenchData.MediumLite();
         var gMedB = gMed.ToByteArray();
         var pMedB = Pn.ToBytes(pMed);
-        var lMedB = LiteSerializer.Serialize<BenchMediumClass>(in lMed);
+        var lMedB = LiteSerializer.For<BenchMediumClass>().Serialize(lMed);
 
-        Section("Medium (nested + repeated + map) — Serialize → byte[]");
-        Row("Google.Protobuf (IMessage)", 500_000, () => gMed.ToByteArray());
-        Row("protobuf-net", 500_000, () => Pn.ToBytes(pMed));
-        Row("Lite (class)", 500_000, () => LiteSerializer.Serialize<BenchMediumClass>(in lMed));
+        Section("Medium (nested + repeated + map) — Serialize");
+        Row("Google.Protobuf -> byte[]", 500_000, () => gMed.ToByteArray());
+        Row("protobuf-net -> byte[]", 500_000, () => Pn.ToBytes(pMed));
+        Row("Lite SerializeTo (reused buf)", 500_000, () => LiteSerializer.SerializeTo<BenchMediumClass>(in lMed, _scratch));
 
         Section("Medium — Deserialize");
         Row("Google.Protobuf (IMessage)", 500_000, () => BenchMedium.Parser.ParseFrom(gMedB));
         Row("protobuf-net", 500_000, () => Pn.From<PnMedium>(pMedB));
-        Row("Lite (class)", 500_000, () => LiteSerializer.Deserialize<BenchMediumClass>(new ReadOnlySequence<byte>(lMedB)));
+        Row("Lite (class)", 500_000, () => LiteSerializer.DeserializeFrom<BenchMediumClass>(new ReadOnlySequence<byte>(lMedB)));
 
         // ───────── Large ─────────
         var gLarge = BenchData.LargeGoogle();
@@ -69,17 +67,17 @@ internal static class ManualBench
         var lLarge = BenchData.LargeLite();
         var gLargeB = gLarge.ToByteArray();
         var pLargeB = Pn.ToBytes(pLarge);
-        var lLargeB = LiteSerializer.Serialize<BenchLargeClass>(in lLarge);
+        var lLargeB = LiteSerializer.For<BenchLargeClass>().Serialize(lLarge);
 
-        Section("Large (1000 items) — Serialize → byte[]");
-        Row("Google.Protobuf (IMessage)", 5_000, () => gLarge.ToByteArray());
-        Row("protobuf-net", 5_000, () => Pn.ToBytes(pLarge));
-        Row("Lite (class)", 5_000, () => LiteSerializer.Serialize<BenchLargeClass>(in lLarge));
+        Section("Large (1000 items) — Serialize");
+        Row("Google.Protobuf -> byte[]", 5_000, () => gLarge.ToByteArray());
+        Row("protobuf-net -> byte[]", 5_000, () => Pn.ToBytes(pLarge));
+        Row("Lite SerializeTo (reused buf)", 5_000, () => LiteSerializer.SerializeTo<BenchLargeClass>(in lLarge, _scratch));
 
         Section("Large — Deserialize");
         Row("Google.Protobuf (IMessage)", 5_000, () => BenchLarge.Parser.ParseFrom(gLargeB));
         Row("protobuf-net", 5_000, () => Pn.From<PnLarge>(pLargeB));
-        Row("Lite (class)", 5_000, () => LiteSerializer.Deserialize<BenchLargeClass>(new ReadOnlySequence<byte>(lLargeB)));
+        Row("Lite (class)", 5_000, () => LiteSerializer.DeserializeFrom<BenchLargeClass>(new ReadOnlySequence<byte>(lLargeB)));
 
         // ───────── Type kinds (vs IMessage) ─────────
         var sStruct = BenchData.UserStruct();
@@ -87,13 +85,13 @@ internal static class ManualBench
         var sRecordStruct = BenchData.UserRecordStruct();
         var sRoRecordStruct = BenchData.UserReadonlyRecordStruct();
 
-        Section("Type kinds — Serialize → byte[] (Small shape, vs IMessage)");
-        Row("Google.Protobuf (IMessage)", 1_000_000, () => gUser.ToByteArray());
-        Row("Lite class", 1_000_000, () => LiteSerializer.Serialize<BenchUserClass>(in lUser));
-        Row("Lite struct", 1_000_000, () => LiteSerializer.Serialize<BenchUserStruct>(in sStruct));
-        Row("Lite record class", 1_000_000, () => LiteSerializer.Serialize<BenchUserRecord>(in sRecord));
-        Row("Lite record struct", 1_000_000, () => LiteSerializer.Serialize<BenchUserRecordStruct>(in sRecordStruct));
-        Row("Lite readonly record struct", 1_000_000, () => LiteSerializer.Serialize<BenchUserReadonlyRecordStruct>(in sRoRecordStruct));
+        Section("Type kinds — SerializeTo (Small shape; Google IMessage baseline allocates)");
+        Row("Google.Protobuf -> byte[]", 1_000_000, () => gUser.ToByteArray());
+        Row("Lite class", 1_000_000, () => LiteSerializer.SerializeTo<BenchUserClass>(in lUser, _scratch));
+        Row("Lite struct", 1_000_000, () => LiteSerializer.SerializeTo<BenchUserStruct>(in sStruct, _scratch));
+        Row("Lite record class", 1_000_000, () => LiteSerializer.SerializeTo<BenchUserRecord>(in sRecord, _scratch));
+        Row("Lite record struct", 1_000_000, () => LiteSerializer.SerializeTo<BenchUserRecordStruct>(in sRecordStruct, _scratch));
+        Row("Lite readonly record struct", 1_000_000, () => LiteSerializer.SerializeTo<BenchUserReadonlyRecordStruct>(in sRoRecordStruct, _scratch));
 
         Console.WriteLine();
     }

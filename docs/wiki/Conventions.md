@@ -51,6 +51,6 @@ Member names are emitted as `snake_case` (`PrimaryAddress` → `primary_address`
 ## Not supported
 
 - `char`, `DateTimeOffset`, `TimeSpan`, arbitrary structs without a proto mapping.
-- Open generics at the call site — `LiteSerializer.Serialize<T>(...)` needs a concrete `T` (a C# 12
+- Open generics at the call site — `LiteSerializer.SerializeTo<T>(...)` needs a concrete `T` (a C# 12
   interceptor constraint). A `Helper<T>()` wrapper will not be intercepted.
 - `sint*` / `fixed*` / `sfixed*` integer encodings (Lite picks one mapping per C# type).

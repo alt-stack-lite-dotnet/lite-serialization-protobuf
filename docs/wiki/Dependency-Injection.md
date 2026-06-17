@@ -6,8 +6,9 @@
 There is nothing to register, no container, no runtime resolution on the serialization path:
 
 ```csharp
-byte[] bytes = LiteSerializer.Serialize<User>(in user);
-User back = LiteSerializer.Deserialize<User>(bytes);
+Span<byte> buf = stackalloc byte[LiteSerializer.ComputeSize(in user)];
+int n = LiteSerializer.SerializeTo(in user, buf);
+User back = LiteSerializer.DeserializeFrom<User>(buf[..n]);
 IProtoSerializer<User> s = LiteSerializer.For<User>();   // cached singleton instance
 Marshaller<User> m = LiteSerializer.MarshallerFor<User>(); // static marshaller
 ```

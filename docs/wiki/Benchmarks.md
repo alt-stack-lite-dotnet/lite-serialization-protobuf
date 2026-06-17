@@ -37,15 +37,17 @@ Representative `-- quick` run (in-process; best of 5 passes). **Absolute numbers
 machine-dependent — run it yourself.** Lower is better. `ns` = nanoseconds/op, `B` = bytes
 allocated/op.
 
+Google.Protobuf and protobuf-net allocate a fresh `byte[]` on every serialize; Lite's `SerializeTo`
+writes into a caller buffer — **0 B/op**.
+
 | Scenario | Google (IMessage) | protobuf-net | Lite | Lite vs Google |
 |---|--:|--:|--:|:--:|
-| Small serialize → byte[] | 223 ns / 152 B | 437 ns / 432 B | **182 ns / 88 B** | **1.2× · 0.58× mem** |
-| Small serialize (`SerializeTo`) | — | — | **114 ns / 0 B** | **zero alloc** |
-| Small deserialize | 296 ns / 552 B | 538 ns / 464 B | **202 ns / 376 B** | **1.5×** |
-| Medium serialize | 526 ns / 208 B | 955 ns / 480 B | **306 ns / 88 B** | **1.7× · 0.42× mem** |
-| Medium deserialize | 854 ns / 1176 B | 1982 ns / 872 B | **631 ns / 904 B** | **1.4×** |
-| Large serialize | 99.6 µs / 26.6 KB | 148 µs / 92 KB | **87.5 µs / 26.6 KB** | **1.14× · min mem** |
-| Large deserialize | 159 µs / 170 KB | 213 µs / 136 KB | **82 µs / 162 KB** | **1.9×** |
+| Small serialize (`SerializeTo`) | 156 ns / 152 B | 476 ns / 432 B | **93 ns / 0 B** | **1.7× · zero alloc** |
+| Small deserialize | 345 ns / 552 B | 513 ns / 464 B | **230 ns / 376 B** | **1.5×** |
+| Medium serialize (`SerializeTo`) | 571 ns / 208 B | 799 ns / 480 B | **201 ns / 0 B** | **2.8× · zero alloc** |
+| Medium deserialize | 652 ns / 1176 B | 1492 ns / 872 B | **459 ns / 904 B** | **1.4×** |
+| Large serialize (`SerializeTo`) | 98.6 µs / 26.6 KB | 127 µs / 92 KB | **48.7 µs / 0 B** | **2.0× · zero alloc** |
+| Large deserialize | 110 µs / 170 KB | 169 µs / 136 KB | **73 µs / 162 KB** | **1.5×** |
 
 ### Type kinds (Small serialize, vs IMessage)
 
@@ -54,21 +56,20 @@ allocation on the hot path.
 
 | Kind | ns/op | B/op |
 |---|--:|--:|
-| Google.Protobuf (class, IMessage) | 172 | 152 |
-| Lite `class` | 223 | 88 |
-| Lite `struct` | 172 | 88 |
-| Lite `record class` | 306 | 88 |
-| Lite `record struct` | 152 | 88 |
-| Lite `readonly record struct` | 152 | 88 |
+| Google.Protobuf (class, IMessage) → byte[] | 156 | 152 |
+| Lite `class` | 93 | **0** |
+| Lite `struct` | 89 | **0** |
+| Lite `record class` | 88 | **0** |
+| Lite `record struct` | 88 | **0** |
+| Lite `readonly record struct` | 89 | **0** |
 
 ### Reading the numbers
 
 - Lite leads on **every** scenario — serialize and deserialize, small to large — and offers a true
   **zero-allocation** path (`SerializeTo` into a caller buffer → 0 B/op).
-- `Serialize → byte[]`'s allocation IS the returned array (payload + 24 B .NET array header) — not a
-  temp buffer. It's still leaner than Google.Protobuf (152 B) and protobuf-net (432 B) for the same
-  result. For zero allocation, pass your own buffer to `SerializeTo` — `stackalloc` for small payloads,
-  `ArrayPool` for large.
+- **Serialize allocates nothing.** There is no `byte[]`-returning API — `SerializeTo` writes into a
+  buffer you provide (`stackalloc` for small, `ArrayPool` for large), so the only allocation a serialize
+  ever makes is none. Google.Protobuf and protobuf-net allocate a fresh array on every call.
 - **Large serialize** allocates only the output size: nested/repeated messages and maps are written
   **directly into the destination span** with no per-element temporary buffer (this removed a former
   ~2× allocation overhead — the old `PooledBufferWriter`-per-element path).

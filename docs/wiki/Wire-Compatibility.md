@@ -28,11 +28,12 @@ message User { int64 id = 1; string name = 2; }
 
 ```csharp
 // Lite → Google
-byte[] bytes = LiteSerializer.Serialize<User>(in user);
-var google = ProtoUser.Parser.ParseFrom(bytes);
+Span<byte> buf = stackalloc byte[LiteSerializer.ComputeSize(in user)];
+int n = LiteSerializer.SerializeTo(in user, buf);
+var google = ProtoUser.Parser.ParseFrom(buf[..n]);
 
 // Google → Lite
-var lite = LiteSerializer.Deserialize<User>(google.ToByteArray());
+var lite = LiteSerializer.DeserializeFrom<User>(google.ToByteArray());
 ```
 
 See `WireCompatTests` for the full bidirectional + size-parity coverage.

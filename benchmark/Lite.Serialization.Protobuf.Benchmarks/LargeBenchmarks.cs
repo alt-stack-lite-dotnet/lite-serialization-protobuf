@@ -22,7 +22,7 @@ public class LargeSerializeBenchmarks
     public byte[] ProtobufNet() => Pn.ToBytes(_pn);
 
     [Benchmark(Description = "Lite (POCO class)")]
-    public byte[] Lite() => LiteSerializer.Serialize<BenchLargeClass>(in _lite);
+    public byte[] Lite() => LiteSerializer.For<BenchLargeClass>().Serialize(_lite);
 }
 
 [MemoryDiagnoser]
@@ -32,7 +32,7 @@ public class LargeDeserializeBenchmarks
     private static byte[] LiteBytes()
     {
         var v = BenchData.LargeLite();
-        return LiteSerializer.Serialize<BenchLargeClass>(in v);
+        return LiteSerializer.For<BenchLargeClass>().Serialize(v);
     }
 
     private static readonly byte[] _googleBytes = BenchData.LargeGoogle().ToByteArray();
@@ -46,5 +46,5 @@ public class LargeDeserializeBenchmarks
     public PnLarge ProtobufNet() => Pn.From<PnLarge>(_pnBytes);
 
     [Benchmark(Description = "Lite (POCO class)")]
-    public BenchLargeClass Lite() => LiteSerializer.Deserialize<BenchLargeClass>(new ReadOnlySequence<byte>(_liteBytes));
+    public BenchLargeClass Lite() => LiteSerializer.DeserializeFrom<BenchLargeClass>(new ReadOnlySequence<byte>(_liteBytes));
 }

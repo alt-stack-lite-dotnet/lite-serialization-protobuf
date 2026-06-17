@@ -14,7 +14,7 @@ public class RobustnessTests
     [Fact]
     public void EmptyInput_DeserializesToDefaultInstance()
     {
-        var rt = LiteSerializer.Deserialize<LiteScalars>(Array.Empty<byte>());
+        var rt = LiteSerializer.DeserializeFrom<LiteScalars>(Array.Empty<byte>());
         Assert.NotNull(rt);
         Assert.Equal(0, rt.I32);
         Assert.Equal("", rt.Text);
@@ -32,14 +32,14 @@ public class RobustnessTests
             Blob = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 },
             Color = LiteColor.Blue,
         };
-        byte[] full = LiteSerializer.Serialize<LiteScalars>(in v);
+        byte[] full = LiteSerializer.For<LiteScalars>().Serialize(v);
 
         // Cutting at a field boundary yields a valid shorter message (no throw); cutting mid-field
         // should fault. Either way the call must RETURN — never spin.
         for (int cut = 0; cut <= full.Length; cut++)
         {
             byte[] truncated = full.AsSpan(0, cut).ToArray();
-            await AssertCompletesQuickly(() => { try { LiteSerializer.Deserialize<LiteScalars>(truncated); } catch { /* faulting is fine */ } });
+            await AssertCompletesQuickly(() => { try { LiteSerializer.DeserializeFrom<LiteScalars>(truncated); } catch { /* faulting is fine */ } });
         }
     }
 
@@ -51,7 +51,7 @@ public class RobustnessTests
         {
             var buf = new byte[rng.Next(0, 64)];
             rng.NextBytes(buf);
-            await AssertCompletesQuickly(() => { try { LiteSerializer.Deserialize<LiteComplex>(buf); } catch { } });
+            await AssertCompletesQuickly(() => { try { LiteSerializer.DeserializeFrom<LiteComplex>(buf); } catch { } });
         }
     }
 
@@ -67,14 +67,14 @@ public class RobustnessTests
             new byte[] { 0x4A, 0x05, 0x01 },               // field 9 (Blob) len=5, only 1 byte follows
         };
         foreach (var bytes in cases)
-            await AssertThrowsQuickly(() => LiteSerializer.Deserialize<LiteScalars>(bytes));
+            await AssertThrowsQuickly(() => LiteSerializer.DeserializeFrom<LiteScalars>(bytes));
     }
 
     [Fact]
     public void NullStringField_RoundTripsToEmpty()
     {
         var v = new LiteScalars { Text = null! };
-        var rt = LiteSerializer.Deserialize<LiteScalars>(LiteSerializer.Serialize<LiteScalars>(in v));
+        var rt = LiteSerializer.DeserializeFrom<LiteScalars>(LiteSerializer.For<LiteScalars>().Serialize(v));
         Assert.Equal("", rt.Text);
     }
 
@@ -82,7 +82,7 @@ public class RobustnessTests
     public void NullCollection_RoundTripsToEmpty()
     {
         var v = new LiteComplex { Numbers = null!, Tags = null!, Items = null! };
-        var rt = LiteSerializer.Deserialize<LiteComplex>(LiteSerializer.Serialize<LiteComplex>(in v));
+        var rt = LiteSerializer.DeserializeFrom<LiteComplex>(LiteSerializer.For<LiteComplex>().Serialize(v));
         Assert.NotNull(rt.Numbers); Assert.Empty(rt.Numbers);
         Assert.NotNull(rt.Tags); Assert.Empty(rt.Tags);
         Assert.NotNull(rt.Items); Assert.Empty(rt.Items);
@@ -92,7 +92,7 @@ public class RobustnessTests
     public void NullByteArray_RoundTripsToEmpty()
     {
         var v = new LiteScalars { Blob = null! };
-        var rt = LiteSerializer.Deserialize<LiteScalars>(LiteSerializer.Serialize<LiteScalars>(in v));
+        var rt = LiteSerializer.DeserializeFrom<LiteScalars>(LiteSerializer.For<LiteScalars>().Serialize(v));
         Assert.NotNull(rt.Blob);
         Assert.Empty(rt.Blob);
     }

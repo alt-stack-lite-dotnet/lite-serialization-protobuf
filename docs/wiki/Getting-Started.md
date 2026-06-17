@@ -34,12 +34,16 @@ using Lite.Serialization.Protobuf;
 
 var user = new User { Id = 42, Name = "Ada", IsActive = true, Tags = { "admin" } };
 
-byte[] bytes = LiteSerializer.Serialize<User>(in user);
-User back = LiteSerializer.Deserialize<User>(bytes);
+// Serialize into a buffer you own — zero allocation:
+Span<byte> buf = stackalloc byte[LiteSerializer.ComputeSize(in user)];
+int n = LiteSerializer.SerializeTo(in user, buf);
+
+// Read it back — zero-copy from the span:
+User back = LiteSerializer.DeserializeFrom<User>(buf[..n]);
 ```
 
 > **The type argument must be concrete at the call site.** The generator intercepts
-> `LiteSerializer.Serialize<User>(...)`; it cannot intercept calls through an open generic `T`.
+> `LiteSerializer.SerializeTo<User>(...)`; it cannot intercept calls through an open generic `T`.
 
 ## Supported type kinds
 
@@ -60,12 +64,11 @@ constructor.
 
 | Call | Purpose |
 |---|---|
-| `LiteSerializer.Serialize<T>(in v)` | serialize to a new exact-size `byte[]` |
-| `LiteSerializer.Serialize<T>(in v, IBufferWriter<byte>)` | serialize into a buffer writer |
 | `LiteSerializer.SerializeTo<T>(in v, Span<byte>)` | zero-alloc write into a caller buffer → bytes written |
+| `LiteSerializer.SerializeTo<T>(in v, IBufferWriter<byte>)` | serialize into a buffer writer / pipeline |
 | `LiteSerializer.SerializeRented<T>(in v)` | pool-backed `RentedBuffer` (dispose it) |
 | `LiteSerializer.ComputeSize<T>(in v)` | exact serialized size in bytes |
-| `LiteSerializer.Deserialize<T>(...)` | from `ReadOnlySequence<byte>` / `ReadOnlySpan<byte>` / `byte[]` |
+| `LiteSerializer.DeserializeFrom<T>(...)` | from `ReadOnlySpan<byte>` (zero-copy) or `ReadOnlySequence<byte>` |
 | `LiteSerializer.For<T>()` | get a reusable `IProtoSerializer<T>` |
 | `LiteSerializer.MarshallerFor<T>()` | get a `Grpc.Core.Marshaller<T>` for gRPC.NET |
 

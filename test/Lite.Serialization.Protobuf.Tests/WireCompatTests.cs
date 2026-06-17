@@ -104,7 +104,7 @@ public class WireCompatTests
             Color = LiteColor.Blue,
         };
 
-        byte[] bytes = LiteSerializer.Serialize<LiteScalars>(in lite);
+        byte[] bytes = LiteSerializer.For<LiteScalars>().Serialize(lite);
         var g = WireScalars.Parser.ParseFrom(bytes);
 
         Assert.Equal(-123_456, g.I32);
@@ -137,7 +137,7 @@ public class WireCompatTests
         };
 
         byte[] bytes = g.ToByteArray();
-        var lite = LiteSerializer.Deserialize<LiteScalars>(bytes);
+        var lite = LiteSerializer.DeserializeFrom<LiteScalars>(bytes);
 
         Assert.Equal(-7, lite.I32);
         Assert.Equal(-42_000_000_000, lite.I64);
@@ -167,7 +167,7 @@ public class WireCompatTests
             Blob = ByteString.CopyFrom(1, 2, 3, 4), Color = WireColor.WireRed,
         };
 
-        byte[] liteBytes = LiteSerializer.Serialize<LiteScalars>(in lite);
+        byte[] liteBytes = LiteSerializer.For<LiteScalars>().Serialize(lite);
         Assert.Equal(g.CalculateSize(), liteBytes.Length);
         Assert.Equal(g.CalculateSize(), LiteSerializer.ComputeSize<LiteScalars>(in lite));
     }
@@ -189,7 +189,7 @@ public class WireCompatTests
             Color = LiteColor.Blue,
         };
 
-        byte[] bytes = LiteSerializer.Serialize<LiteComplex>(in lite);
+        byte[] bytes = LiteSerializer.For<LiteComplex>().Serialize(lite);
         var g = WireComplex.Parser.ParseFrom(bytes);
 
         Assert.Equal(777, g.Id);
@@ -222,7 +222,7 @@ public class WireCompatTests
         g.Counts.Add("k", 42);
 
         byte[] bytes = g.ToByteArray();
-        var lite = LiteSerializer.Deserialize<LiteComplex>(bytes);
+        var lite = LiteSerializer.DeserializeFrom<LiteComplex>(bytes);
 
         Assert.Equal(555, lite.Id);
         Assert.Equal("from-google", lite.Name);
@@ -257,7 +257,7 @@ public class WireCompatTests
         g.Items.Add(new WireInner { X = 9, Label = "z" });
         g.Counts.Add("c", 5);
 
-        byte[] liteBytes = LiteSerializer.Serialize<LiteComplex>(in lite);
+        byte[] liteBytes = LiteSerializer.For<LiteComplex>().Serialize(lite);
         Assert.Equal(g.CalculateSize(), liteBytes.Length);
     }
 
@@ -267,7 +267,7 @@ public class WireCompatTests
     public void DefaultValues_ProduceEmptyWire_LikeProto3()
     {
         var lite = new LiteScalars(); // all defaults
-        byte[] bytes = LiteSerializer.Serialize<LiteScalars>(in lite);
+        byte[] bytes = LiteSerializer.For<LiteScalars>().Serialize(lite);
 
         Assert.Empty(bytes); // proto3: default scalars are not written
         var g = WireScalars.Parser.ParseFrom(bytes);
