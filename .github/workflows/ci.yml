@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: ['**']
+    branches: ['**']          # build on every push, any branch
   pull_request:
-    branches: [main, develop]
+    branches: [develop, master, 'release/**']
 
 jobs:
   build-and-test:
@@ -23,5 +23,8 @@ jobs:
       - name: Build
         run: dotnet build Lite.Serialization.Protobuf.sln -c Release --no-restore
 
+      # Tests run on pushes/merges to develop and on any pull request.
+      # (They also run during publish — see publish.yml.)
       - name: Test
+        if: github.ref == 'refs/heads/develop' || github.event_name == 'pull_request'
         run: dotnet test Lite.Serialization.Protobuf.sln -c Release --no-build --verbosity normal
