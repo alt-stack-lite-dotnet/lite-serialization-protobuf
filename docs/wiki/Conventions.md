@@ -1,77 +1,56 @@
-# Conventions (binder generation)
+# Conventions
 
-This page documents **what gets generated** and **how binders are named**.
+How Lite maps C# to protobuf, with no attributes.
 
-## When a binder is generated
+## Supported type kinds
 
-A binder is generated for a type if:
+`class`, `struct`, `record class`, `record struct`, `readonly record struct`. Mutable types are filled
+property-by-property; positional records are built through their primary constructor. The generator
+picks constructor-mode vs setter-mode automatically based on what is settable vs init-only.
 
-- the type has type-level `[FromBody]`, **or**
-- at least one instance property has a Lite `From*` attribute (`FromRoute`, `FromQuery`, `FromBody`, etc.), **or**
-- the type is targeted by a fluent `IRequestBindingConfiguration<TRequest>` (if present)
+## Type mapping
 
-## Binder name
+| C# | proto | notes |
+|---|---|---|
+| `int` / `long` / `uint` / `ulong` | int32 / int64 / uint32 / uint64 | varint |
+| `short` / `ushort` / `byte` / `sbyte` | int32 / uint32 | widened |
+| `bool` | bool | |
+| `float` / `double` | float / double | fixed32 / fixed64 |
+| `string` | string | UTF-8 |
+| `byte[]` | bytes | |
+| `enum` | enum | varint |
+| `Guid` | bytes (16) | Lite-specific encoding |
+| `DateTime` | int64 | UTC ticks, Lite-specific |
+| `decimal` | bytes (16) | lossless via `decimal.GetBits()`, Lite-specific |
+| `T?` (nullable value) | underlying | null ⇒ omitted |
+| nested POCO | message | length-delimited |
+| `List<T>` / `T[]` / `IList<T>` / `IReadOnlyList<T>` | repeated | packed for scalars |
+| `Dictionary<K,V>` / `IDictionary` / `IReadOnlyDictionary` | map<K,V> | proto3 key types |
 
-For a request model named:
+See [Wire Compatibility](Wire-Compatibility.md) for which of these are byte-compatible with
+Google.Protobuf (standard scalars, repeated, map, enum, nested) versus Lite-only (`Guid`, `DateTime`,
+`decimal`).
 
-```csharp
-public sealed class CreateUserRequest { }
-```
+## Field tags
 
-The generated binder is:
+Precedence: fluent `.Tag(n)` > `const int XxxFieldNumber` > FNV-1a name-hash. The name-hash is
+deterministic and stable across adding/reordering fields, but changes if you **rename** a field — so
+pin explicit numbers for anything on the wire.
 
-```csharp
-public sealed class CreateUserRequestBinder { }
-```
+## Proto names
 
-### Nested types
+Member names are emitted as `snake_case` (`PrimaryAddress` → `primary_address`). Override with
+`.Name("...")` in a [fluent config](Fluent-Configuration.md).
 
-Nested types include all containing type names, joined with `_`:
+## proto3 semantics
 
-```csharp
-public sealed class Outer
-{
-    public sealed class InnerRequest { }
-}
-```
+- Default values (`0`, `""`, `false`, default enum) are omitted from the wire.
+- Fields may appear in any order; the reader accepts any order.
+- Unknown fields are skipped; missing fields read as default. (Forward/backward compatible.)
 
-Binder name:
+## Not supported
 
-```csharp
-public sealed class Outer_InnerRequestBinder { }
-```
-
-### Naming override
-
-You can override the generated binder class name with:
-
-```csharp
-[Lite.Serialization.Protobuf.Attributes.BinderName("MyCustomBinder")]
-public sealed class MyRequest { }
-```
-
-If you use a fluent binding configuration, you can also place the attribute on the configuration type:
-
-```csharp
-[Lite.Serialization.Protobuf.Attributes.BinderName("MyCustomBinder")]
-public sealed class MyRequestBindingConfiguration
-    : Lite.Serialization.Protobuf.Fluent.IRequestBindingConfiguration<MyRequest>
-{
-    public void Configure(Lite.Serialization.Protobuf.Fluent.IRequestBindingBuilder<MyRequest> builder)
-    {
-    }
-}
-```
-
-## Binder namespace
-
-Binders are generated into the **same namespace** as the request model.
-
-If the request model is in the global namespace, the binder is also emitted into the global namespace.
-
-## Generic request models
-
-Open generic request models (e.g. `UpdateCommand<TPayload>`) are **skipped** by the generator.
-
-Reason: generated binders are concrete types, and open generics make binder emission and registration ambiguous.
-
+- `char`, `DateTimeOffset`, `TimeSpan`, arbitrary structs without a proto mapping.
+- Open generics at the call site — `LiteSerializer.Serialize<T>(...)` needs a concrete `T` (a C# 12
+  interceptor constraint). A `Helper<T>()` wrapper will not be intercepted.
+- `sint*` / `fixed*` / `sfixed*` integer encodings (Lite picks one mapping per C# type).

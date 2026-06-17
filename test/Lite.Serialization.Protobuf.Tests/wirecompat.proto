@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package wirecompat;
+
+option csharp_namespace = "Lite.Serialization.Protobuf.Tests.Proto";
+
+// Reference schema parsed by Google.Protobuf. Uses ONLY the wire types Lite emits for the
+// matching C# types (no sint/fixed/sfixed — Lite never emits zigzag or fixed-varint variants),
+// so a Lite POCO with matching field numbers is byte-compatible with this message.
+enum WireColor {
+  WIRE_COLOR_UNSPECIFIED = 0;
+  WIRE_RED = 1;
+  WIRE_GREEN = 2;
+  WIRE_BLUE = 3;
+}
+
+message WireInner {
+  int32 x = 1;
+  string label = 2;
+}
+
+message WireScalars {
+  int32     i32 = 1;
+  int64     i64 = 2;
+  uint32    u32 = 3;
+  uint64    u64 = 4;
+  bool      flag = 5;
+  float     f = 6;
+  double    d = 7;
+  string    text = 8;
+  bytes     blob = 9;
+  WireColor color = 10;
+}
+
+message WireComplex {
+  int64              id = 1;
+  string             name = 2;
+  WireInner          inner = 3;
+  repeated int32     numbers = 4;
+  repeated string    tags = 5;
+  repeated WireInner items = 6;
+  map<string, int32> counts = 7;
+  WireColor          color = 8;
+}

@@ -14,12 +14,16 @@ public class SerializeBenchmarks
     private static readonly BenchUserStruct LiteStruct = MakeStruct();
     private static readonly BenchUserClass LiteClass = MakeClass();
     private static readonly BenchUser GoogleProto = MakeGoogle();
+    private static readonly PnUser ProtobufNetUser = BenchData.UserPn();
 
     private static readonly IProtoSerializer<BenchUserStruct> SerStruct = LiteSerializer.For<BenchUserStruct>();
     private static readonly IProtoSerializer<BenchUserClass> SerClass = LiteSerializer.For<BenchUserClass>();
 
     [Benchmark(Baseline = true, Description = "Google.Protobuf (IMessage class)")]
     public byte[] Google_Serialize() => GoogleProto.ToByteArray();
+
+    [Benchmark(Description = "protobuf-net (class)")]
+    public byte[] ProtobufNet_Serialize() => Pn.ToBytes(ProtobufNetUser);
 
     [Benchmark(Description = "Lite (POCO class)")]
     public byte[] LiteClass_Serialize() => SerClass.Serialize(LiteClass);
@@ -120,9 +124,13 @@ public class DeserializeBenchmarks
     private static readonly byte[] LiteStructBytes = SerStruct.Serialize(SerializeBenchmarks_GetStruct());
     private static readonly byte[] LiteClassBytes = SerClass.Serialize(SerializeBenchmarks_GetClass());
     private static readonly byte[] GoogleBytes = SerializeBenchmarks_GetGoogle().ToByteArray();
+    private static readonly byte[] PnBytes = Pn.ToBytes(BenchData.UserPn());
 
     [Benchmark(Baseline = true, Description = "Google.Protobuf (IMessage class)")]
     public BenchUser Google_Deserialize() => BenchUser.Parser.ParseFrom(GoogleBytes);
+
+    [Benchmark(Description = "protobuf-net (class)")]
+    public PnUser ProtobufNet_Deserialize() => Pn.From<PnUser>(PnBytes);
 
     [Benchmark(Description = "Lite (POCO class)")]
     public BenchUserClass LiteClass_Deserialize() => SerClass.Deserialize(LiteClassBytes);

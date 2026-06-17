@@ -1,0 +1,10 @@
+<Project>
+  <!-- Register the generated interceptor namespace so C# interceptors emitted by the source
+       generator are honored. Done in .targets (imported after the consumer's own PropertyGroups)
+       so the consumer's existing values are preserved and ours are appended. -->
+  <PropertyGroup>
+    <InterceptorsNamespaces>$(InterceptorsNamespaces);Lite.Serialization.Protobuf.Generated</InterceptorsNamespaces>
+    <!-- Pre-GA SDKs used a separate property name for preview interceptors; set both for compatibility. -->
+    <InterceptorsPreviewNamespaces>$(InterceptorsPreviewNamespaces);Lite.Serialization.Protobuf.Generated</InterceptorsPreviewNamespaces>
+  </PropertyGroup>
+</Project>

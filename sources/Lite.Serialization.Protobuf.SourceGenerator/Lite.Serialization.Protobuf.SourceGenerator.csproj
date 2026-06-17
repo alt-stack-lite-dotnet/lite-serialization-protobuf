@@ -8,7 +8,9 @@
     <IsRoslynComponent>true</IsRoslynComponent>
     <NoWarn>$(NoWarn);RSEXPERIMENTAL002</NoWarn>
 
-    <!-- Source Generator packaging: place DLL in analyzers folder, not lib -->
+    <!-- Not packed standalone: the DLL is bundled into the Lite.Serialization.Protobuf package
+         (see that project's _BundleSourceGenerator target). -->
+    <IsPackable>false</IsPackable>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
@@ -16,6 +18,12 @@
     <!-- No symbols for analyzers -->
     <IncludeSymbols>false</IncludeSymbols>
   </PropertyGroup>
+
+  <!-- Analyzer release tracking (satisfies RS2008). -->
+  <ItemGroup>
+    <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
+    <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference

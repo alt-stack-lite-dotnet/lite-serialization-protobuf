@@ -1,44 +1,76 @@
 # Getting Started
 
-## Install / reference
+## Install
 
-Reference `Lite.Serialization.Protobuf` from your application.
-
-## Register services
-
-At minimum, you need a body parser if you use `[FromBody]`:
-
-```csharp
-services.AddSingleton<Lite.Serialization.Protobuf.Body.IBodyParser,
-    Lite.Serialization.Protobuf.Body.SystemTextJsonBodyParser>();
+```bash
+dotnet add package Lite.Serialization.Protobuf
 ```
 
-## Annotate request models
+That is all the wiring you need. The package ships MSBuild props/targets (`buildTransitive/`) that
+auto-register the generated interceptor namespace and the generator's compiler-visible properties — so
+`LiteSerializer.*` calls are intercepted out of the box, with **no manual `<InterceptorsNamespaces>`**
+in your `.csproj`.
 
-### Whole model from body
+> Requires a C# 12+ / .NET 8+ toolchain (interceptors). The package targets `net10.0`.
 
-```csharp
-using Lite.Serialization.Protobuf.Attributes;
+## First round-trip
 
-[FromBody]
-public sealed record CreateUserRequest(string Name, int Age);
-```
-
-### Mixed sources (route + body), immutable struct
+Define a normal type — no attributes:
 
 ```csharp
-using Lite.Serialization.Protobuf.Attributes;
-
-public readonly record struct UpdateSomeEntityCommand(
-    [property: FromRoute("entityId")] int EntityId,
-    [property: FromBody] Payload Payload);
-
-public sealed record Payload(string Name);
+public sealed class User
+{
+    public long Id { get; set; }
+    public string Name { get; set; } = "";
+    public bool IsActive { get; set; }
+    public List<string> Tags { get; set; } = new();
+}
 ```
 
-## Use the generated binder
+Serialize and deserialize:
 
-The generator emits `*Binder` classes implementing `IRequestBinder<T>` or `IAsyncRequestBinder<T>`.
+```csharp
+using Lite.Serialization.Protobuf;
 
-Binders have constructor-injected dependencies (register as singletons in your app).
+var user = new User { Id = 42, Name = "Ada", IsActive = true, Tags = { "admin" } };
 
+byte[] bytes = LiteSerializer.Serialize<User>(in user);
+User back = LiteSerializer.Deserialize<User>(bytes);
+```
+
+> **The type argument must be concrete at the call site.** The generator intercepts
+> `LiteSerializer.Serialize<User>(...)`; it cannot intercept calls through an open generic `T`.
+
+## Supported type kinds
+
+The same data works as any of these:
+
+```csharp
+public class            UserClass(...) { ... }
+public struct           UserStruct { ... }
+public record class     UserRecord(long Id, string Name);
+public record struct    UserRecordStruct(long Id, string Name);
+public readonly record struct UserRo(long Id, string Name);
+```
+
+Mutable types are filled property-by-property; positional records are constructed via their primary
+constructor.
+
+## API at a glance
+
+| Call | Purpose |
+|---|---|
+| `LiteSerializer.Serialize<T>(in v)` | serialize to a new exact-size `byte[]` |
+| `LiteSerializer.Serialize<T>(in v, IBufferWriter<byte>)` | serialize into a buffer writer |
+| `LiteSerializer.SerializeTo<T>(in v, Span<byte>)` | zero-alloc write into a caller buffer → bytes written |
+| `LiteSerializer.SerializeRented<T>(in v)` | pool-backed `RentedBuffer` (dispose it) |
+| `LiteSerializer.ComputeSize<T>(in v)` | exact serialized size in bytes |
+| `LiteSerializer.Deserialize<T>(...)` | from `ReadOnlySequence<byte>` / `ReadOnlySpan<byte>` / `byte[]` |
+| `LiteSerializer.For<T>()` | get a reusable `IProtoSerializer<T>` |
+| `LiteSerializer.MarshallerFor<T>()` | get a `Grpc.Core.Marshaller<T>` for gRPC.NET |
+
+## Next
+
+- Talking to Google.Protobuf code? See [Wire Compatibility](Wire-Compatibility.md).
+- Wiring a gRPC service? See [gRPC](gRPC.md).
+- Need to control field numbers/names? See [Fluent Configuration](Fluent-Configuration.md).

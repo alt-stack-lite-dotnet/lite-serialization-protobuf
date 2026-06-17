@@ -4,6 +4,7 @@ package bench;
 
 option csharp_namespace = "Lite.Serialization.Protobuf.Benchmarks.Proto";
 
+// Small — flat scalars + one repeated string.
 message BenchUser {
     int64 id = 1;
     string name = 2;
@@ -11,4 +12,26 @@ message BenchUser {
     bool is_active = 4;
     int32 age = 5;
     repeated string tags = 6;
+}
+
+message BenchInner {
+    int32 x = 1;
+    string label = 2;
+}
+
+// Medium — nested message + repeated scalar + repeated string + map.
+message BenchMedium {
+    int64 id = 1;
+    string name = 2;
+    BenchInner inner = 3;
+    repeated int32 numbers = 4;
+    repeated string tags = 5;
+    map<string, int32> counts = 6;
+}
+
+// Large — big collections.
+message BenchLarge {
+    repeated int64 ids = 1;
+    repeated string names = 2;
+    repeated BenchInner items = 3;
 }

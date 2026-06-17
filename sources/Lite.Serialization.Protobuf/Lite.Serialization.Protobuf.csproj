@@ -7,25 +7,49 @@
     <IsPackable>true</IsPackable>
 
     <PackageId>Lite.Serialization.Protobuf</PackageId>
-    <Version>1.0.0-alpha</Version>
-    <PackageVersion>1.0.0-alpha</PackageVersion>
+    <Version>1.0.0-rc-1</Version>
+    <PackageVersion>1.0.0-rc-1</PackageVersion>
+    <Authors>Serafim Prozorov</Authors>
+    <Description>Code-first, source-generator-driven Protobuf serializer for plain POCO types (class/struct/record) — no attributes and no .proto required. Zero-allocation wire serialization with first-class gRPC.NET Marshaller&lt;T&gt; integration.</Description>
+    <PackageTags>grpc;protobuf;serialization;source-generator;interceptors;poco;codegen</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageTags>grpc;protobuf;serialization;source-generator;interceptors</PackageTags>
+    <PackageReleaseNotes>1.0.0-rc-1: first release candidate. Code-first POCO serialization, exact-size two-pass writer, pooled buffers, gRPC.NET Marshaller&lt;T&gt; integration, CLI proto export/import.</PackageReleaseNotes>
+    <RepositoryType>git</RepositoryType>
+
+    <!-- Single-package layout: the source generator DLL is bundled into this package's analyzers
+         folder (see _BundleSourceGenerator below) rather than shipped as a separate package. -->
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);_BundleSourceGenerator</TargetsForTfmSpecificContentInPackage>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Grpc.Core.Api" Version="2.71.0" />
   </ItemGroup>
 
+  <!-- The generator runs during this project's own build (self-test) and is bundled into the package.
+       ReferenceOutputAssembly=false: we run the generator, we don't link its assembly. -->
   <ItemGroup>
     <ProjectReference
       Include="..\Lite.Serialization.Protobuf.SourceGenerator\Lite.Serialization.Protobuf.SourceGenerator.csproj"
       OutputItemType="Analyzer"
-      ReferenceOutputAssembly="false"
-    />
+      ReferenceOutputAssembly="false" />
   </ItemGroup>
 
+  <!-- Packaged content: README + MSBuild props/targets that auto-wire interceptors for consumers. -->
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="" />
+    <None Include="buildTransitive\Lite.Serialization.Protobuf.props" Pack="true" PackagePath="buildTransitive\" />
+    <None Include="buildTransitive\Lite.Serialization.Protobuf.targets" Pack="true" PackagePath="buildTransitive\" />
   </ItemGroup>
+
+  <!-- Bundle the built generator DLL into analyzers/dotnet/cs of this package. -->
+  <Target Name="_BundleSourceGenerator">
+    <PropertyGroup>
+      <_LiteSgDll>$(MSBuildThisFileDirectory)..\Lite.Serialization.Protobuf.SourceGenerator\bin\$(Configuration)\netstandard2.0\Lite.Serialization.Protobuf.SourceGenerator.dll</_LiteSgDll>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(_LiteSgDll)')"
+           Text="Source generator not built at '$(_LiteSgDll)'. Build before pack: dotnet build -c $(Configuration)." />
+    <ItemGroup>
+      <TfmSpecificPackageFile Include="$(_LiteSgDll)" PackagePath="analyzers/dotnet/cs" />
+    </ItemGroup>
+  </Target>
 </Project>

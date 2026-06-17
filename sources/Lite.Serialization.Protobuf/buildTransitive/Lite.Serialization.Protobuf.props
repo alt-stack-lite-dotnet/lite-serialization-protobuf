@@ -1,0 +1,16 @@
+<Project>
+  <!-- Lite.Serialization.Protobuf — consumer auto-wiring.
+       NuGet imports this automatically for any project that references the package
+       (buildTransitive => applies to direct AND transitive references). -->
+  <PropertyGroup>
+    <!-- Opt-in toggle: intercept grpc::Marshallers.Create<T>() call sites (e.g. in Grpc.Tools-generated
+         code) so they use the Lite serializer instead of Google.Protobuf. Off by default.
+         Set <LiteSerializerInterceptGrpc>true</LiteSerializerInterceptGrpc> in your project to enable. -->
+    <LiteSerializerInterceptGrpc Condition="'$(LiteSerializerInterceptGrpc)' == ''">false</LiteSerializerInterceptGrpc>
+  </PropertyGroup>
+
+  <!-- Expose the toggle to the source generator (it reads build_property.LiteSerializerInterceptGrpc). -->
+  <ItemGroup>
+    <CompilerVisibleProperty Include="LiteSerializerInterceptGrpc" />
+  </ItemGroup>
+</Project>

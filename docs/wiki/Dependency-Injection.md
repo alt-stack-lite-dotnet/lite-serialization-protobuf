@@ -1,22 +1,37 @@
 # Dependency Injection
 
-## Rule: no service resolution in hot path
+## Lite needs no DI
 
-Generated binders do **not** call `request.HttpContext.RequestServices.GetService(...)` during binding.
+`LiteSerializer` is static and the per-type serializers are generated at compile time as singletons.
+There is nothing to register, no container, no runtime resolution on the serialization path:
 
-All required services (body parser, value parsers, `[FromServices]` dependencies) are injected into the binder constructor.
+```csharp
+byte[] bytes = LiteSerializer.Serialize<User>(in user);
+User back = LiteSerializer.Deserialize<User>(bytes);
+IProtoSerializer<User> s = LiteSerializer.For<User>();   // cached singleton instance
+Marshaller<User> m = LiteSerializer.MarshallerFor<User>(); // static marshaller
+```
 
-## Body parsing
+`For<T>()` and `MarshallerFor<T>()` return the same generated instances every call — safe to capture in
+a `static readonly` field.
 
-`[FromBody]` requires an `IBodyParser`.
+## Where DI does appear: gRPC.NET
 
-Default: `SystemTextJsonBodyParser` (from package `Lite.Serialization.Protobuf.Body.Json`). Body is buffered and rewound (`EnableBuffering()` + `Position = 0`) so multiple reads work; parsers use `TryParseAsync` and do not throw on invalid payloads.
+The serializer is DI-free, but binding a code-first service into gRPC.NET uses the standard
+gRPC.NET DI extension points — that's the host's container, not Lite's:
 
-## Value parsing (`IValueParser<T>`)
+```csharp
+builder.Services.AddGrpc();
+builder.Services.AddSingleton<GreeterService>();
+builder.Services.TryAddEnumerable(
+    ServiceDescriptor.Singleton<IServiceMethodProvider<GreeterService>, GreeterMethodProvider>());
+```
 
-For route/query/header/cookie/form values, the generator prefers:
+The `Method<,>` your provider binds carries Lite marshallers (`LiteSerializer.MarshallerFor<T>()`).
+See [gRPC](gRPC.md) for the full pattern.
 
-1. `IValueParser<T>` (if needed and injected into binder)
-2. `IParsable<T>` (when available)
-3. built-in primitive parsing
+## Consumer project setup
 
+The NuGet package's `buildTransitive` props/targets wire the source-generator interceptors
+automatically — no manual `<InterceptorsNamespaces>` or `<CompilerVisibleProperty>` needed. The only
+opt-in property is `LiteSerializerInterceptGrpc` (see [gRPC](gRPC.md)).

@@ -1,90 +1,75 @@
 # Practices
 
-This page focuses on *why* certain shapes work well with this library, and when you might choose alternatives.
+Guidance for getting the most out of Lite.
 
-## Practice 1: Prefer 1:1 request models (when it fits)
+## Pin field numbers for anything on the wire
 
-If your “command” shape matches your HTTP contract, bind it directly.
-
-### Why this is a great default here
-
-- **Less glue code**: no mapping/adapters that can drift over time.
-- **Fewer failure modes**: fewer places to forget a field or apply the wrong conversion.
-- **Immutable-friendly**: ctor-based creation for `record` / `record struct` fits “data in → command out”.
-- **Performance clarity**: the generated binder is the whole story (no hidden runtime resolution).
-
-### When 1:1 becomes painful (and a transport DTO is worth it)
-
-Use a separate transport DTO only when you actually need a boundary:
-
-- **Contract churn / versioning** (v1/v2 payload shapes, legacy keys)
-- **Multiple HTTP contracts** for the same domain action (different endpoints/clients)
-- **HTTP-only concerns** you don’t want in the domain model (cookies/headers/security metadata)
-- **PATCH / partial updates** where “missing vs default” must be represented explicitly
-
-## Practice 2: Keep the “update envelope” idea, but stay concrete for HTTP
-
-A common pattern is an update envelope:
-
-- route provides the target id
-- body provides the payload
-
-You *can* express it as a generic:
+The default name-hash tags are fine for local storage, but they change if you rename a field, and they
+don't match a hand-written `.proto`. For gRPC, persisted data, or cross-service messages, set explicit
+numbers — either the const convention or a fluent config:
 
 ```csharp
-public readonly record struct UpdateCommand<TPayload>(
-    [property: FromRoute("entityId")] int TargetId,
-    [property: FromBody] TPayload Payload);
-```
-
-However, source generation works best when the request model is **concrete**.
-Open generic request types make binder naming/emission and DI registration harder.
-
-**Recommended in practice:** keep the envelope concept, but define a concrete request type per HTTP contract:
-
-```csharp
-public readonly record struct UpdateSomeEntityCommand(
-    [property: FromRoute("entityId")] int TargetId,
-    [property: FromBody] UpdateSomeEntityPayload Payload);
-```
-
-This keeps the request model 1:1 and generation-friendly.
-
-## Practice 3: Make body shape explicit when it buys you something
-
-Wrapping the body into a dedicated type can be useful:
-
-```csharp
-public readonly record struct UpdateSomeEntityCommand(
-    [property: FromRoute("entityId")] int TargetId,
-    [property: FromBody] UpdateSomeEntityBody Body)
+public sealed class User
 {
-    public UpdateSomeEntityPayload Payload => Body.Payload;
+    public const int IdFieldNumber = 1;   public long Id { get; set; }
+    public const int NameFieldNumber = 2; public string Name { get; set; } = "";
 }
-
-public sealed record UpdateSomeEntityBody(UpdateSomeEntityPayload Payload);
 ```
 
-### Why you might do this
+This also makes the wire byte-identical to Google.Protobuf (see [Wire Compatibility](Wire-Compatibility.md)).
 
-- Leaves room for **metadata** later (`traceId`, `version`, `meta`, etc.) without breaking the route/query shape.
-- Avoids naming collisions and keeps “route/query vs body” visually separated.
+## Choose struct vs class deliberately
 
-### Why you might not
+Lite serializes any kind — use that. A `struct` / `readonly record struct` message has **no heap
+allocation for the instance itself**, which Google.Protobuf cannot offer (its messages are always
+classes). Good for small, hot-path messages:
 
-- It changes the JSON shape (you now expect `{"body":{...}}` unless your body parser is configured otherwise).
-- Adds an extra type (still no mapping, but more declarations).
+```csharp
+public readonly record struct Tick(long Symbol, double Price, long Ts)
+{
+    public const int SymbolFieldNumber = 1;
+    public const int PriceFieldNumber = 2;
+    public const int TsFieldNumber = 3;
+}
+```
 
-## Practice 4: Keep request models immutable
+Use a `class` for large messages, shared mutable state, or deep graphs where copying a big struct
+would cost more than it saves.
 
-Prefer immutable request models:
+## Reach for the zero-allocation path on hot loops
 
-- `record` / `record struct`
-- ctor parameters annotated with `[property: FromX]`
+`Serialize → byte[]` allocates exactly the result array. To allocate nothing, provide the buffer:
 
-Why:
+```csharp
+// small — on the stack
+Span<byte> buf = stackalloc byte[256];
+int n = LiteSerializer.SerializeTo(in value, buf);
 
-- the binder can create the request in one shot (no partial mutation)
-- it prevents half-initialized objects
-- it matches “command” semantics
+// large — from a pool
+byte[] rented = ArrayPool<byte>.Shared.Rent(LiteSerializer.ComputeSize(in value));
+try   { int n = LiteSerializer.SerializeTo(in value, rented); /* use rented[..n] */ }
+finally { ArrayPool<byte>.Shared.Return(rented); }
+```
 
+`SerializeRented` returns a pool-backed `RentedBuffer` if you'd rather Lite manage the rent (dispose it).
+
+## Prefer immutable messages
+
+`record` / `record struct` with a primary constructor deserialize in one shot (constructor-mode), which
+avoids half-initialized instances and matches message/DTO semantics. Mutable classes work too — the
+generator fills settable members.
+
+## Evolve schemas additively
+
+Protobuf's compatibility holds only if numbers are stable:
+
+- **Add** fields with **new** numbers — old readers skip them, new readers default missing ones.
+- **Never** reuse or renumber an existing field — that silently reinterprets bytes.
+- Removing a field is fine; don't recycle its number later.
+
+## Keep `T` concrete at the call site
+
+`LiteSerializer.Serialize<T>(...)` is intercepted by field number at the call site, so `T` must be a
+concrete type there. A generic wrapper `void Send<T>(T v) => LiteSerializer.Serialize(in v)` won't be
+intercepted (a C# 12 interceptor limitation). Call with the concrete type, or expose
+`IProtoSerializer<T>` from `For<T>()` at a concrete boundary.

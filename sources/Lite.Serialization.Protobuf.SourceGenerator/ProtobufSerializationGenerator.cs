@@ -14,7 +14,6 @@ namespace Lite.Serialization.Protobuf.SourceGenerator;
 public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
 {
     private const string LiteSerializerFqn = "Lite.Serialization.Protobuf.LiteSerializer";
-    private const string ConfigInterfaceFqn = "Lite.Serialization.Protobuf.Fluent.IProtoSerializerConfiguration";
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
@@ -170,7 +169,12 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
         INamedTypeSymbol? iface = null;
         foreach (var i in cfgSym.AllInterfaces)
         {
-            if (i.IsGenericType && i.OriginalDefinition.ToDisplayString() == ConfigInterfaceFqn)
+            var od = i.OriginalDefinition;
+            // Match by namespace + name + arity. Comparing OriginalDefinition.ToDisplayString()
+            // against a bare FQN fails because the display string includes the "<T>" type parameter.
+            if (i.IsGenericType && od.Arity == 1 &&
+                od.Name == "IProtoSerializerConfiguration" &&
+                od.ContainingNamespace?.ToDisplayString() == "Lite.Serialization.Protobuf.Fluent")
             {
                 iface = i;
                 break;
@@ -947,7 +951,7 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
             sb.AppendLine("        {");
             sb.Append("            foreach (var __kv in ").Append(member).AppendLine(")");
             sb.AppendLine("            {");
-            sb.Append("                int __keySz = ").Append(ScalarValueSizeExpr(f.Mapping.KeyKind, "__kv.Key")).AppendLine(";");
+            EmitMapKeySize(sb, f.Mapping, "                ");
             EmitMapValueSize(sb, f.Mapping, "                ");
             sb.AppendLine("                int __entry = 1 + __keySz + 1 + __valSz;");
             sb.Append("                size += ").Append(mapTagSz).Append(" + ").Append(VarintSizeFqn).AppendLine("((ulong)__entry) + __entry;");
@@ -1052,6 +1056,23 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
         sb.Append("            size += ").Append(tagSz).Append(" + ").Append(ScalarValueSizeExpr(k, member)).AppendLine(";");
     }
 
+    private static void EmitMapKeySize(StringBuilder sb, WireMapping m, string indent)
+    {
+        // Sets a local `int __keySz` based on m.KeyKind and __kv.Key.
+        // Proto map keys are integral, bool, or string (never bytes/float/double/message),
+        // so a length-delimited key means string; everything else is a scalar varint.
+        if (m.KeyKind == WireKind.String)
+        {
+            sb.Append(indent).AppendLine("int __keySz;");
+            sb.Append(indent).AppendLine("if (__kv.Key is null) __keySz = 1;");
+            sb.Append(indent).Append("else { int __kbc = global::System.Text.Encoding.UTF8.GetByteCount(__kv.Key); __keySz = ").Append(VarintSizeFqn).AppendLine("((ulong)__kbc) + __kbc; }");
+        }
+        else
+        {
+            sb.Append(indent).Append("int __keySz = ").Append(ScalarValueSizeExpr(m.KeyKind, "__kv.Key")).AppendLine(";");
+        }
+    }
+
     private static void EmitMapValueSize(StringBuilder sb, WireMapping m, string indent)
     {
         // Sets a local `int __valSz` based on m.ValueKind and __kv.Value
@@ -1071,6 +1092,10 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
                 sb.Append(indent).AppendLine("int __valSz;");
                 sb.Append(indent).AppendLine("if (__kv.Value is null) __valSz = 1;");
                 sb.Append(indent).Append("else { int __ns = ").Append(m.ValueNestedSerializerFqn).Append(".ComputeSize(__kv.Value); __valSz = ").Append(VarintSizeFqn).AppendLine("((ulong)__ns) + __ns; }");
+                return;
+            case WireKind.Guid:
+            case WireKind.Decimal:
+                sb.Append(indent).AppendLine("int __valSz = 1 + 16;"); // varint(16) length prefix (1) + 16 payload bytes
                 return;
             default:
                 sb.Append(indent).Append("int __valSz = ").Append(ScalarValueSizeExpr(m.ValueKind, "__kv.Value")).AppendLine(";");
@@ -1114,7 +1139,7 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
                 sb.Append("        if (").Append(member).Append(" is { Length: > 0 }) w.WriteBytes(").Append(f.Tag).Append(", ").Append(member).AppendLine(");");
                 return;
             case WireKind.Message:
-                sb.Append("        if (").Append(member).Append(" is not null) w.WriteMessage(").Append(f.Tag).Append(", ").Append(member).Append(", ").Append(f.Mapping.NestedSerializerFqn).AppendLine(".Instance);");
+                AppendDirectMessageWrite(sb, "        ", "w", f.Tag, member, f.Mapping.NestedSerializerFqn!);
                 return;
             case WireKind.Guid:
                 sb.Append("        if (").Append(member).AppendLine(" != global::System.Guid.Empty)");
@@ -1150,6 +1175,21 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
         sb.Append("        if (").Append(DefaultSkipCondition(f.Mapping.Kind, member)).Append(") ");
         EmitWriteScalar(sb, f.Mapping.Kind, f.Tag, member, f.Mapping);
         sb.AppendLine();
+    }
+
+    // Writes a nested message DIRECTLY into the span: tag + length(ComputeSize) + the message's own
+    // WriteToSpan into the free region. No temp PooledBufferWriter, no copy, no interface dispatch —
+    // this is what keeps nested/repeated message serialization allocation-free. Self-contained block,
+    // so the local `__dm` never collides across call sites.
+    private static void AppendDirectMessageWrite(StringBuilder sb, string indent, string writerVar, int tag, string valueExpr, string serFqn)
+    {
+        sb.Append(indent).Append("{ var __dm = ").Append(valueExpr).Append(";").AppendLine();
+        sb.Append(indent).Append("  if (__dm is not null) {").AppendLine();
+        sb.Append(indent).Append("    ").Append(writerVar).Append(".WriteRawTag(").Append(tag).AppendLine(", global::Lite.Serialization.Protobuf.WireFormat.ProtoWireType.LengthDelimited);");
+        sb.Append(indent).Append("    int __dms = ").Append(serFqn).AppendLine(".ComputeSize(__dm);");
+        sb.Append(indent).Append("    ").Append(writerVar).AppendLine(".WriteRawVarint((ulong)__dms);");
+        sb.Append(indent).Append("    ").Append(writerVar).Append(".Advance(").Append(serFqn).Append(".WriteToSpan(in __dm, ").Append(writerVar).AppendLine(".FreeSpan));");
+        sb.Append(indent).AppendLine("} }");
     }
 
     private static void EmitWriteRepeated(StringBuilder sb, FieldModel f, string member)
@@ -1191,23 +1231,21 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
         sb.AppendLine("            {");
         sb.AppendLine("                foreach (var __kv in __m)");
         sb.AppendLine("                {");
-        sb.AppendLine("                    var __mt = new global::Lite.Serialization.Protobuf.WireFormat.PooledBufferWriter();");
-        sb.AppendLine("                    try");
-        sb.AppendLine("                    {");
-        sb.AppendLine("                        var __mw = new global::Lite.Serialization.Protobuf.WireFormat.ProtoWriter(__mt);");
-        // Key always at tag 1, no default-skip (proto3 maps always serialize key/value pair)
-        sb.Append("                        ");
-        EmitMapKvWrite(sb, "__mw", 1, "__kv.Key", f.Mapping.KeyKind, null, null);
+        // Entry size — identical formula to ComputeSize, so the length prefix is exact and we can
+        // write key+value straight into the span (no temp PooledBufferWriter per entry).
+        EmitMapKeySize(sb, f.Mapping, "                    ");
+        EmitMapValueSize(sb, f.Mapping, "                    ");
+        sb.AppendLine("                    int __entry = 1 + __keySz + 1 + __valSz;");
+        sb.Append("                    w.WriteRawTag(").Append(f.Tag).AppendLine(", global::Lite.Serialization.Protobuf.WireFormat.ProtoWireType.LengthDelimited);");
+        sb.AppendLine("                    w.WriteRawVarint((ulong)__entry);");
+        // Key (tag 1)
+        sb.Append("                    ");
+        EmitMapKvWrite(sb, "w", 1, "__kv.Key", f.Mapping.KeyKind, null, null);
         sb.AppendLine();
-        // Value at tag 2
-        sb.Append("                        ");
-        EmitMapKvWrite(sb, "__mw", 2, "__kv.Value", f.Mapping.ValueKind, f.Mapping.ValueClrFqn, f.Mapping.ValueNestedSerializerFqn);
+        // Value (tag 2)
+        sb.Append("                    ");
+        EmitMapKvWrite(sb, "w", 2, "__kv.Value", f.Mapping.ValueKind, f.Mapping.ValueClrFqn, f.Mapping.ValueNestedSerializerFqn);
         sb.AppendLine();
-        sb.Append("                        w.WriteRawTag(").Append(f.Tag).AppendLine(", global::Lite.Serialization.Protobuf.WireFormat.ProtoWireType.LengthDelimited);");
-        sb.AppendLine("                        w.WriteRawVarint((ulong)__mt.WrittenLength);");
-        sb.AppendLine("                        w.WriteRawBytes(__mt.WrittenSpan);");
-        sb.AppendLine("                    }");
-        sb.AppendLine("                    finally { __mt.Dispose(); }");
         sb.AppendLine("                }");
         sb.AppendLine("            }");
         sb.AppendLine("        }");
@@ -1224,7 +1262,7 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
             case WireKind.Bool: sb.Append(writerVar).Append(".WriteBool(").Append(tag).Append(", ").Append(valueExpr).Append(");"); return;
             case WireKind.Float: sb.Append(writerVar).Append(".WriteFloat(").Append(tag).Append(", ").Append(valueExpr).Append(");"); return;
             case WireKind.Double: sb.Append(writerVar).Append(".WriteDouble(").Append(tag).Append(", ").Append(valueExpr).Append(");"); return;
-            case WireKind.String: sb.Append(writerVar).Append(".WriteString(").Append(tag).Append(", ").Append(valueExpr).Append(");"); return;
+            case WireKind.String: sb.Append(writerVar).Append(".WriteString(").Append(tag).Append(", ").Append(valueExpr).Append(" ?? \"\");"); return;
             case WireKind.Bytes: sb.Append(writerVar).Append(".WriteBytes(").Append(tag).Append(", ").Append(valueExpr).Append(");"); return;
             case WireKind.Enum: sb.Append(writerVar).Append(".WriteInt32(").Append(tag).Append(", (int)").Append(valueExpr).Append(");"); return;
             case WireKind.Int32WidenFromSByte:
@@ -1249,7 +1287,13 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
                 sb.Append("                            ").Append(writerVar).Append(".WriteFixedLengthBytes(").Append(tag).AppendLine(", __db);");
                 sb.Append("                        }"); return;
             case WireKind.Message:
-                sb.Append("if (").Append(valueExpr).Append(" is not null) ").Append(writerVar).Append(".WriteMessage(").Append(tag).Append(", ").Append(valueExpr).Append(", ").Append(nestedSerializerFqn).Append(".Instance);"); return;
+                // Always write the value field (tag + length); a null message becomes a zero-length
+                // message, matching EmitMapValueSize's __valSz for null. Written directly — no temp buffer.
+                sb.Append("{ var __dmv = ").Append(valueExpr).Append("; ").Append(writerVar)
+                  .Append(".WriteRawTag(").Append(tag).Append(", global::Lite.Serialization.Protobuf.WireFormat.ProtoWireType.LengthDelimited); ")
+                  .Append("if (__dmv is null) ").Append(writerVar).Append(".WriteRawVarint(0); else { int __dmvs = ")
+                  .Append(nestedSerializerFqn).Append(".ComputeSize(__dmv); ").Append(writerVar).Append(".WriteRawVarint((ulong)__dmvs); ")
+                  .Append(writerVar).Append(".Advance(").Append(nestedSerializerFqn).Append(".WriteToSpan(in __dmv, ").Append(writerVar).Append(".FreeSpan)); } }"); return;
             default:
                 sb.Append("/* unsupported map kv ").Append(kind).Append(" */"); return;
         }
@@ -1299,7 +1343,10 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
         {
             case WireKind.String: sb.Append("if (").Append(vexpr).Append(" is not null) w.WriteString(").Append(tag).Append(", ").Append(vexpr).Append(");"); return;
             case WireKind.Bytes: sb.Append("if (").Append(vexpr).Append(" is not null) w.WriteBytes(").Append(tag).Append(", ").Append(vexpr).Append(");"); return;
-            case WireKind.Message: sb.Append("if (").Append(vexpr).Append(" is not null) w.WriteMessage(").Append(tag).Append(", ").Append(vexpr).Append(", ").Append(mapping.NestedSerializerFqn).Append(".Instance);"); return;
+            case WireKind.Message:
+                sb.AppendLine();
+                AppendDirectMessageWrite(sb, "                    ", "w", tag, vexpr, mapping.NestedSerializerFqn!);
+                return;
             case WireKind.Guid:
                 sb.AppendLine("{");
                 sb.AppendLine("                    global::System.Span<byte> __gb = stackalloc byte[16];");
@@ -1411,23 +1458,37 @@ public sealed class ProtobufSerializationGenerator : IIncrementalGenerator
             var elem = f.Mapping.ElementClrTypeFqn!;
             sb.Append("                case ").Append(f.Tag).AppendLine(":");
             sb.AppendLine("                {");
-            sb.Append("                    ").Append(local).Append(" ??= new global::System.Collections.Generic.List<").Append(elem).AppendLine(">();");
+            var listCtor = "new global::System.Collections.Generic.List<" + elem + ">";
 
             if (IsPackable(k))
             {
+                // For fixed-width packed items (float/double) the element count is exactly
+                // payloadLength / itemSize, so we pre-size the list and avoid every growth realloc.
+                string? capExpr = k switch
+                {
+                    WireKind.Float => "__len / 4",
+                    WireKind.Double => "__len / 8",
+                    _ => null,
+                };
                 sb.AppendLine("                    if (wireType == global::Lite.Serialization.Protobuf.WireFormat.ProtoWireType.LengthDelimited)");
                 sb.AppendLine("                    {");
                 sb.AppendLine("                        var __len = (int)r.ReadRawVarint();");
                 sb.AppendLine("                        var __end = r.BytesConsumed + __len;");
+                if (capExpr is not null)
+                    sb.Append("                        ").Append(local).Append(" ??= ").Append(listCtor).Append("(").Append(capExpr).AppendLine(");");
+                else
+                    sb.Append("                        ").Append(local).Append(" ??= ").Append(listCtor).AppendLine("();");
                 sb.AppendLine("                        while (r.BytesConsumed < __end) " + ReadOneItem(k, local, f.Mapping));
                 sb.AppendLine("                    }");
                 sb.AppendLine("                    else");
                 sb.AppendLine("                    {");
+                sb.Append("                        ").Append(local).Append(" ??= ").Append(listCtor).AppendLine("();");
                 sb.AppendLine("                        " + ReadOneItem(k, local, f.Mapping));
                 sb.AppendLine("                    }");
             }
             else
             {
+                sb.Append("                    ").Append(local).Append(" ??= ").Append(listCtor).AppendLine("();");
                 sb.AppendLine("                    " + ReadOneItem(k, local, f.Mapping));
             }
             sb.AppendLine("                    break;");
@@ -1868,27 +1929,27 @@ namespace Lite.Serialization.Protobuf.Generated
     // ----- Diagnostics -----
     private static readonly DiagnosticDescriptor UnsupportedType = new(
         id: "LITEGRPC001", title: "Unsupported member type",
-        messageFormat: "Type '{0}' on member '{1}' of '{2}' is not supported by Lite.Serialization.Protobuf.",
+        messageFormat: "Type '{0}' on member '{1}' of '{2}' is not supported by Lite.Serialization.Protobuf",
         category: "LiteGrpc", defaultSeverity: DiagnosticSeverity.Error, isEnabledByDefault: true);
 
     private static readonly DiagnosticDescriptor NotConstructible = new(
         id: "LITEGRPC002", title: "Type cannot be constructed for deserialization",
-        messageFormat: "Cannot construct '{1}': member '{0}' is not settable and not part of any constructor parameter list.",
+        messageFormat: "Cannot construct '{1}': member '{0}' is not settable and not part of any constructor parameter list",
         category: "LiteGrpc", defaultSeverity: DiagnosticSeverity.Error, isEnabledByDefault: true);
 
     private static readonly DiagnosticDescriptor DuplicateTag = new(
         id: "LITEGRPC003", title: "Duplicate proto tag",
-        messageFormat: "Duplicate proto tag {0} in '{1}' between {2}. Override one via IProtoSerializerConfiguration<T>.",
+        messageFormat: "Duplicate proto tag {0} in '{1}' between {2}; override one via IProtoSerializerConfiguration<T>",
         category: "LiteGrpc", defaultSeverity: DiagnosticSeverity.Error, isEnabledByDefault: true);
 
     private static readonly DiagnosticDescriptor GenericNotSupported = new(
         id: "LITEGRPC004", title: "Generic types not supported",
-        messageFormat: "Generic type '{0}' is not supported as a serialization root in V1.",
+        messageFormat: "Generic type '{0}' is not supported as a serialization root in V1",
         category: "LiteGrpc", defaultSeverity: DiagnosticSeverity.Warning, isEnabledByDefault: true);
 
     private static readonly DiagnosticDescriptor NoMembers = new(
         id: "LITEGRPC005", title: "No serializable members",
-        messageFormat: "Type '{0}' has no public properties or fields to serialize.",
+        messageFormat: "Type '{0}' has no public properties or fields to serialize",
         category: "LiteGrpc", defaultSeverity: DiagnosticSeverity.Warning, isEnabledByDefault: true);
 
     private static readonly DiagnosticDescriptor GeneratorCrashed = new(
@@ -1898,7 +1959,7 @@ namespace Lite.Serialization.Protobuf.Generated
 
     private static readonly DiagnosticDescriptor GrpcInteropSkipped = new(
         id: "LITEGRPC100", title: "gRPC marshaller interception skipped",
-        messageFormat: "Message '{0}' has a shape Lite cannot serialize yet (repeated/map/oneof); its Marshallers.Create call is left to Google.Protobuf (wire format stays compatible).",
+        messageFormat: "Message '{0}' has a shape Lite cannot serialize yet (repeated/map/oneof); its Marshallers.Create call is left to Google.Protobuf (wire format stays compatible)",
         category: "LiteGrpc", defaultSeverity: DiagnosticSeverity.Info, isEnabledByDefault: true);
 }
 

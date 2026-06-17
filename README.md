@@ -45,32 +45,91 @@ new Method<GetUserRequest, GetUserResponse>(MethodType.Unary, ..., marshaller, .
 
 ## Performance
 
-Бенч против `Google.Protobuf` (`Grpc.Tools`-сгенерированный класс с `IMessage`). Сообщение: 6 полей (long, 2 string, bool, int, list of 3 string).
+Бенч против `Google.Protobuf` (IMessage от `Grpc.Tools`) и `protobuf-net`. Три формы payload (Small / Medium / Large), пять C#-видов типа. Полная таблица — в [вики → Benchmarks](docs/wiki/Benchmarks.md).
 
-### Serialize
+### Lite быстрее во всём
 
-| API | Time | vs Google | Memory |
-|---|---:|---:|---:|
-| Google.Protobuf `ToByteArray()` (baseline) | 175 ns | 1.00× | 152-336 B |
-| `LiteSerializer.SerializeTo(in v, span)` (zero-alloc, struct) | **104 ns** | **0.60×** | **0 B** |
-| `LiteSerializer.SerializeTo(in v, span)` (zero-alloc, class) | **128 ns** | **0.74×** | **0 B** |
-| `LiteSerializer.SerializeRented(in v)` (pool, struct) | 158 ns | 0.91× | 24 B |
-| `LiteSerializer.Serialize(in v) → byte[]` (struct) | **156 ns** | **0.90×** | 106 B |
-| `LiteSerializer.Serialize(in v) → byte[]` (class) | 189 ns | 1.09× | 120 B |
+Во сколько раз Lite быстрее `Google.Protobuf` (длиннее — быстрее, `1.0×` = Google):
 
-### Deserialize
+```
+Large deserialize    1.9×  ███████████████████
+Medium serialize     1.7×  █████████████████
+Small  deserialize   1.5×  ███████████████
+Medium deserialize   1.4×  ██████████████
+Small  serialize     1.2×  ████████████
+Large  serialize     1.1×  ███████████
+                           ╵─────────╵ Google 1.0×
+```
 
-| API | Time | vs Google | Memory |
-|---|---:|---:|---:|
-| Google.Protobuf `Parser.ParseFrom()` (baseline) | 254 ns | 1.00× | 552 B |
-| `LiteSerializer.Deserialize<RecordClass>` | **218 ns** | **0.85×** | 344 B (62%) |
-| `LiteSerializer.Deserialize<Struct>` | **224 ns** | **0.88×** | ~250 B (46%) |
-| `LiteSerializer.Deserialize<RecordStruct>` | **223 ns** | **0.88×** | ~250 B |
-| `LiteSerializer.Deserialize<Class>` | 247 ns | 0.97× | 376 B (68%) |
+Head-to-head, large payload deserialize (короче — быстрее):
 
-**Везде: быстрее Google, и от 30% до 100% меньше памяти.**
+```
+Lite          ████████              82 µs
+Google        ███████████████      159 µs
+protobuf-net  █████████████████████ 213 µs
+```
 
-Конфиг: BenchmarkDotNet v0.15.8, .NET 10.0.7, Intel Core i5-9300H, Windows 11. См. [`benchmark/`](benchmark/Lite.Serialization.Protobuf.Benchmarks/) для воспроизведения.
+Аллокации на serialize, small payload (короче — лучше):
+
+```
+Lite           ███           88 B   (только результат; SerializeTo → 0 B)
+Google         ██████       152 B
+protobuf-net   █████████████ 432 B
+```
+
+### Самый сок
+
+Lite **быстрее всех в каждом сценарии** — и serialize, и deserialize:
+
+| Сценарий | Google (IMessage) | protobuf-net | **Lite** | Lite vs Google |
+|---|---:|---:|---:|:---:|
+| Medium serialize | 526 ns / 208 B | 955 ns / 480 B | **306 ns / 88 B** | **1.7× быстрее · 0.42× памяти** |
+| Medium deserialize | 854 ns / 1176 B | 1982 ns / 872 B | **631 ns / 904 B** | **1.4× быстрее** |
+| Large serialize | 99.6 µs / 26.6 KB | 148 µs / 92 KB | **87.5 µs / 26.6 KB** | **быстрее, минимум памяти** |
+| Large deserialize | 159 µs / 170 KB | 213 µs / 136 KB | **82 µs / 162 KB** | **1.9× быстрее** |
+| Small serialize (`SerializeTo`) | 223 ns / 152 B | 437 ns / 432 B | **114 ns / 0 B** | **0 аллокаций** |
+
+> `Serialize → byte[]` аллоцирует ровно размер выхода (никакого overhead); `SerializeTo(span)` — **ноль**.
+
+**Структуры — то, чего `Google.Protobuf` не умеет вовсе** (его сообщения всегда `class` + `IMessage`). Lite сериализует `struct` и `readonly record struct` за **152–172 ns / 88 B** — наравне с IMessage по времени, но без аллокации самого сообщения на горячем пути.
+
+### Структуры — то, что Google.Protobuf не умеет
+
+`Google.Protobuf` всегда генерит классы (`IMessage`) — каждое сообщение это heap-объект. Lite сериализует **struct / record struct / readonly record struct** напрямую, без аллокации объекта-сообщения:
+
+| Тип (Small serialize) | ns/op | B/op |
+|---|---:|---:|
+| Google.Protobuf (class, IMessage) | 296 | 152 |
+| Lite `class` | 219 | 88 |
+| Lite `struct` | 196 | 88 |
+| Lite `record struct` | 225 | 88 |
+| Lite `readonly record struct` | 228 | 88 |
+
+### Аллокации: буфер выбираешь ты
+
+`Serialize → byte[]` выделяет **ровно один** массив — тот, что возвращает (payload + 24 B заголовка массива .NET, без всякого overhead). Нужен ноль аллокаций — отдай свой буфер в `SerializeTo`: `stackalloc` для мелких, `ArrayPool` для крупных. Один и тот же Small-объект:
+
+| Путь | ns/op | B/op |
+|---|---:|---:|
+| Google.Protobuf → `byte[]` | 261 | 152 |
+| protobuf-net → `byte[]` | 461 | 432 |
+| **Lite → `byte[]`** (выделяет только результат) | **170** | **88** |
+| Lite `SerializeTo` + `stackalloc` (мелкие) | 107 | **0** |
+| Lite `SerializeTo` + `ArrayPool` (крупные) | 130 | **0** |
+
+```csharp
+// мелкие — на стеке, ноль аллокаций
+Span<byte> buf = stackalloc byte[256];
+int n = LiteSerializer.SerializeTo(in value, buf);
+Send(buf[..n]);
+
+// крупные — из пула, ноль аллокаций на вызов
+var rented = ArrayPool<byte>.Shared.Rent(LiteSerializer.ComputeSize(in value));
+try { int n = LiteSerializer.SerializeTo(in value, rented); Send(rented.AsSpan(0, n)); }
+finally { ArrayPool<byte>.Shared.Return(rented); }
+```
+
+Цифры — in-process микробенч (`-- quick`), машинозависимы. Строгий прогон (BenchmarkDotNet, 3 launch × 20 iter + MemoryDiagnoser): `dotnet run -c Release --project benchmark/Lite.Serialization.Protobuf.Benchmarks`. См. [`benchmark/`](benchmark/Lite.Serialization.Protobuf.Benchmarks/).
 
 ## API surface
 
@@ -188,7 +247,7 @@ Streaming (server/client/bidi gRPC) — это уровень транспорт
 
 ## Status
 
-`1.0.0-alpha`. API стабилизируется. Welcome to file issues.
+`1.0.0-rc-1`. API стабилизируется. Welcome to file issues.
 
 ## Build
 

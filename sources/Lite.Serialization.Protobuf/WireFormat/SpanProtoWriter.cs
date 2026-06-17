@@ -27,6 +27,17 @@ public ref struct SpanProtoWriter
         get => _written;
     }
 
+    /// <summary>The unwritten remainder of the destination. Used to write a nested message directly
+    /// into this buffer (no temp allocation) — pair with <see cref="Advance"/>.</summary>
+    public Span<byte> FreeSpan
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _span.Slice(_written);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Advance(int count) => _written += count;
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void WriteRawTag(int fieldNumber, ProtoWireType wireType) =>
         WriteRawVarint(ProtoTag.Make(fieldNumber, wireType));

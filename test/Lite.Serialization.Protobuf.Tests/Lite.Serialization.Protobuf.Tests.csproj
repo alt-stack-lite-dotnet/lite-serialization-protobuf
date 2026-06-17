@@ -23,6 +23,20 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
   </ItemGroup>
 
+  <!-- Wire-compatibility tests: a real Grpc.Tools-generated reference parser (Google.Protobuf)
+       to cross-check that Lite bytes are genuine protobuf. -->
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" Version="3.30.0" />
+    <PackageReference Include="Grpc.Tools" Version="2.71.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="wirecompat.proto" GrpcServices="None" />
+  </ItemGroup>
+
   <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>

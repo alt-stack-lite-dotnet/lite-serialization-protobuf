@@ -1,52 +1,77 @@
-name: Publish Packages
+name: Publish to NuGet
 
+# Publishing is driven by merges into master / release branches (not by pushing a tag).
+# The package version comes from the csproj (<PackageVersion>); a matching tag + GitHub Release
+# is created as part of publishing. Re-runs without a version bump are no-ops (skip-duplicate +
+# existing-release check).
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - master
+      - 'release/**'
+
+env:
+  PROJECT: sources/Lite.Serialization.Protobuf/Lite.Serialization.Protobuf.csproj
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write   # create the tag + GitHub Release
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Ensure tag commit is in release branch
-        run: |
-          if git branch -r --contains "${GITHUB_SHA}" | grep -Eq "origin/release/"; then
-            echo "Tag commit is in release branch."
-          else
-            echo "Tag commit is NOT in release/* branch. Skipping publish."
-            exit 1
-          fi
-        working-directory: Lite.Serialization.Protobuf
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
 
+      - name: Read package version from csproj
+        id: ver
+        run: |
+          VERSION=$(grep -oP '<PackageVersion>\K[^<]+' "$PROJECT" | head -1)
+          if [ -z "$VERSION" ]; then echo "::error::PackageVersion not found in $PROJECT"; exit 1; fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Package version: $VERSION"
+
       - name: Restore
-        run: dotnet restore
-        working-directory: Lite.Serialization.Protobuf
+        run: dotnet restore "$PROJECT"
 
       - name: Build
-        run: dotnet build -c Release --no-restore
-        working-directory: Lite.Serialization.Protobuf
+        run: dotnet build "$PROJECT" -c Release --no-restore
 
-      - name: Pack core and body packages
+      - name: Pack
+        run: dotnet pack "$PROJECT" -c Release --no-build -o ./nupkg
+
+      # Attach the .nupkg to the workflow run (downloadable even if the NuGet push fails).
+      - name: Upload .nupkg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lite.Serialization.Protobuf-${{ steps.ver.outputs.version }}
+          path: ./nupkg/*.nupkg
+          if-no-files-found: error
+
+      - name: Push to NuGet
+        run: >
+          dotnet nuget push "./nupkg/*.nupkg"
+          --api-key "${{ secrets.NUGET_API_KEY }}"
+          --source "https://api.nuget.org/v3/index.json"
+          --skip-duplicate
+
+      # Create the tag + GitHub Release for this version (with the .nupkg attached). Pre-release
+      # versions (e.g. 1.0.0-rc-1) are flagged as pre-releases. Skipped if it already exists.
+      - name: Tag and GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          dotnet pack "sources/Lite.Serialization.Protobuf/Lite.Serialization.Protobuf.csproj" -c Release --no-build -o ./nupkg
-          dotnet pack "sources/Lite.Serialization.Protobuf.Body.Json/Lite.Serialization.Protobuf.Body.Json.csproj" -c Release --no-build -o ./nupkg
-          dotnet pack "sources/Lite.Serialization.Protobuf.Body.Xml/Lite.Serialization.Protobuf.Body.Xml.csproj" -c Release --no-build -o ./nupkg
-          dotnet pack "sources/Lite.Serialization.Protobuf.Body.MessagePack/Lite.Serialization.Protobuf.Body.MessagePack.csproj" -c Release --no-build -o ./nupkg
-          dotnet pack "sources/Lite.Serialization.Protobuf.Body.MemoryPack/Lite.Serialization.Protobuf.Body.MemoryPack.csproj" -c Release --no-build -o ./nupkg
-        working-directory: Lite.Serialization.Protobuf
-
-      - name: Push packages to NuGet
-        run: dotnet nuget push "./nupkg/*.nupkg" --api-key "${{ secrets.NUGET_API_KEY }}" --source "https://api.nuget.org/v3/index.json" --skip-duplicate
-        working-directory: Lite.Serialization.Protobuf
-
+          VERSION="${{ steps.ver.outputs.version }}"
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "Release $VERSION already exists — nothing to do."
+            exit 0
+          fi
+          PRERELEASE=
+          case "$VERSION" in *-*) PRERELEASE=--prerelease ;; esac
+          gh release create "$VERSION" ./nupkg/*.nupkg \
+            --title "$VERSION" \
+            --target "$GITHUB_SHA" \
+            --generate-notes $PRERELEASE
